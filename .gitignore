@@ -1,0 +1,72 @@
+# keys
+**/kaggle.json
+
+# Presentation and documentation folders
+0sunum/
+
+# Data and media folders (anywhere in the repository)
+**/results/
+**/images/
+**/videos/
+**/data/
+**/videos/
+**/test_results/
+**/test_output/
+**/0example_data/
+**/MaritimeSkyFixed/
+**/VIS_Onboard/
+**/Buoy/
+
+# Large media files (videos, images, etc.)
+*.avi
+*.mp4
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tiff
+*.gif
+
+# Model files - large binary files should not be in git
+# *.pth
+# *.pkl
+# *.h5
+# *.onnx
+*.model
+*.weights
+
+# Python cache and compiled files
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# IDE and editor folders
+**/.vscode/
+**/.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Model files - large binary files should not be in git
+*.pth
+*.pkl
+*.h5
+*.onnx
+*.model
+*.weights
