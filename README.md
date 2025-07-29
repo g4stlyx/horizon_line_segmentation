@@ -1,6 +1,9 @@
 # Maritime Horizon Line Detection & Segmentation
 
 ***IMPORTANT: IT IS NOT COMPLETED YET***
+<br>
+
+***IMPORTANT 2: I could not upload models since they are over 100MB and Github does not allow such files to be pushed. i may upload(e.g. to Google Drive) a final model tho when possible***
 
 This repository contains multiple approaches and implementations for detecting horizon lines in maritime environments, ranging from simple image-based detection to advanced real-time video processing with deep learning models.
 
