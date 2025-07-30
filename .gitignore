@@ -3,6 +3,7 @@
 
 # Presentation and documentation folders
 0sunum/
+0data/
 
 # Data and media folders (anywhere in the repository)
 **/results/

@@ -4,29 +4,33 @@
 # Install necessary libraries. SciPy is needed for loading .mat files.
 !pip install opencv-python-headless scipy
 
-#! does nothing, will look at it again, this is the problem:
 """
 Preprocessing complete. Total frames processed: 17222
 
 Dataset loaded: 17222 images.
-Training set: 13777, Validation set: 3445
+Total videos: 37 -> Train: 29, Val: 4, Test: 4
+Total frames: 17222 -> Train: 13911, Val: 1561, Test: 1750
 
 --- Starting U-Net Training ---
-Epoch 1/25 -> Train Loss: 0.0133, Val Loss: 0.0000
-  -> Model saved with new best validation loss: 0.0000
-!Epoch 2/25 -> Train Loss: 0.0000, Val Loss: 0.0000
-  -> Model saved with new best validation loss: 0.0000
-!Epoch 3/25 -> Train Loss: 0.0000, Val Loss: 0.0000
-  -> Model saved with new best validation loss: 0.0000
-
+Epoch 1/50 -> Train Loss: 0.0971, Val Loss: 0.0366, Val IoU: 0.9812
+  -> Model saved with new best validation IoU: 0.9812
+Epoch 2/50 -> Train Loss: 0.0070, Val Loss: 0.0082, Val IoU: 0.9934
+  -> Model saved with new best validation IoU: 0.9934
+! still reaches the best model after 2 epochs, shows overfitting, thats a problem.
+! needs a better, more varied dataset to train on
+Epoch 3/50 -> Train Loss: 0.0049, Val Loss: 0.0100, Val IoU: 0.9923
+Epoch 4/50 -> Train Loss: 0.0034, Val Loss: 0.0090, Val IoU: 0.9930
+Epoch 5/50 -> Train Loss: 0.0029, Val Loss: 0.0093, Val IoU: 0.9934
 """
-
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau # --- CHANGE: Added for learning rate scheduling
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
 import torchvision.models as models
 from torchvision.models.resnet import ResNet18_Weights
 
@@ -38,6 +42,8 @@ import matplotlib.pyplot as plt
 import math
 from google.colab import drive
 from scipy.io import loadmat
+import collections
+import random
 
 # Check if a GPU is available and set the device accordingly.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -52,34 +58,40 @@ if torch.cuda.is_available():
 drive.mount('/content/drive')
 
 # --- IMPORTANT: SET YOUR PATHS HERE ---
-BASE_DRIVE_PATH = '/content/drive/My Drive/SMD_Dataset' # <-- CHANGE THIS
+BASE_DRIVE_PATH = '/content/drive/My Drive/SMD_Dataset' 
+
+# --- FIX: ADD THESE TWO LINES ---
 SMD_VIDEOS_PATH = os.path.join(BASE_DRIVE_PATH, 'VIS_Onshore/Videos')
 SMD_GT_PATH = os.path.join(BASE_DRIVE_PATH, 'VIS_Onshore/HorizonGT')
+GDRIVE_MODEL_SAVE_PATH = os.path.join(BASE_DRIVE_PATH, 'models')
+GDRIVE_PROCESSED_IMAGES_PATH = os.path.join(BASE_DRIVE_PATH, 'processed_unet/images')
+GDRIVE_PROCESSED_MASKS_PATH = os.path.join(BASE_DRIVE_PATH, 'processed_unet/masks')
 
-# This is where the processed images and labels (now as masks) will be saved.
-PROCESSED_DATA_PATH = os.path.join(BASE_DRIVE_PATH, 'processed_smd_unet')
-PROCESSED_IMAGES_PATH = os.path.join(PROCESSED_DATA_PATH, 'images')
-PROCESSED_MASKS_PATH = os.path.join(PROCESSED_DATA_PATH, 'masks')
+# --- The rest of your path definitions follow ---
+GDRIVE_PROCESSED_DATA_PATH = os.path.join(BASE_DRIVE_PATH, 'processed_unet')
+os.makedirs(GDRIVE_MODEL_SAVE_PATH, exist_ok=True)
 
-os.makedirs(PROCESSED_IMAGES_PATH, exist_ok=True)
-os.makedirs(PROCESSED_MASKS_PATH, exist_ok=True)
 
-print(f"Paths set. Looking for data in: {BASE_DRIVE_PATH}")
+# This is where the data will be stored LOCALLY on the Colab machine for fast access.
+# --- CHANGE: Renamed local path for consistency ---
+LOCAL_DATA_PATH = '/content/processed_unet'
+LOCAL_IMAGES_PATH = os.path.join(LOCAL_DATA_PATH, 'images')
+LOCAL_MASKS_PATH = os.path.join(LOCAL_DATA_PATH, 'masks')
+
+os.makedirs(GDRIVE_PROCESSED_IMAGES_PATH, exist_ok=True)
+os.makedirs(GDRIVE_PROCESSED_MASKS_PATH, exist_ok=True)
+
+print(f"Google Drive processed data path: {GDRIVE_PROCESSED_DATA_PATH}")
+print(f"Google Drive model save path: {GDRIVE_MODEL_SAVE_PATH}")
+print(f"Local runtime data path: {LOCAL_DATA_PATH}")
 
 # ==============================================================================
-# Step 3: Preprocess Data for U-Net (Creating Segmentation Masks)
+# Step 3: Preprocess Data for U-Net (Run only ONCE)
 # ==============================================================================
-
-# --- DEBUGGING FLAG ---
-# Set to True to visualize the first few generated masks and stop.
-# Set to False to run the full preprocessing.
-# FIX: Set to False to process the entire dataset for proper training.
-DEBUG_PREPROCESSING = False
-
 def preprocess_smd_for_segmentation():
     """
-    Extracts frames and creates ground truth segmentation masks using the
-    precise normal vector and point data from the .mat files.
+    Extracts frames and creates ground truth segmentation masks.
+    Saves the output to your Google Drive.
     """
     print("Starting SMD preprocessing for Segmentation...")
     video_files = sorted([f for f in os.listdir(SMD_VIDEOS_PATH) if f.endswith('.avi')])
@@ -87,225 +99,220 @@ def preprocess_smd_for_segmentation():
     processed_count = 0
     total_videos = len(video_files)
 
-    # Lists to hold debug data
-    debug_images = []
-    debug_masks = []
-
     for i, video_file in enumerate(video_files):
         print(f"Processing video {i+1}/{total_videos}: {video_file}")
         video_name_without_ext = os.path.splitext(video_file)[0]
         gt_filename = f"{video_name_without_ext}_HorizonGT.mat"
-
         video_path = os.path.join(SMD_VIDEOS_PATH, video_file)
         gt_path = os.path.join(SMD_GT_PATH, gt_filename)
-
-        if not os.path.exists(gt_path):
-            continue
-
+        if not os.path.exists(gt_path): continue
         gt_data = loadmat(gt_path)
-
         horizon_key = None
         for key in gt_data.keys():
             if not key.startswith('__'):
                 horizon_key = key
                 break
-
         if horizon_key is None: continue
         struct_array = gt_data[horizon_key]
         if struct_array.size == 0: continue
-
         cap = cv2.VideoCapture(video_path)
         frame_idx = 0
         while True:
             ret, frame = cap.read()
             if not ret: break
             if frame_idx >= struct_array.shape[1]: break
-
             try:
                 frame_struct = struct_array[0, frame_idx]
-
                 x_point = float(frame_struct['X'][0,0])
                 y_point = float(frame_struct['Y'][0,0])
                 nx = float(frame_struct['Nx'][0,0])
                 ny = float(frame_struct['Ny'][0,0])
-
                 h, w, _ = frame.shape
-
                 if abs(ny) < 1e-6:
-                    y_left = y_point
-                    y_right = y_point
+                    y_left = y_point; y_right = y_point
                 else:
                     c = -(nx * x_point + ny * y_point)
                     y_left = -c / ny
                     y_right = -(c + nx * (w - 1)) / ny
-
                 mask = np.zeros((h, w), dtype=np.uint8)
-
-                poly_points = np.array([
-                    [0, 0], [w - 1, 0], [w - 1, y_right], [0, y_left]
-                ], dtype=np.int32)
-
+                poly_points = np.array([[0, 0], [w - 1, 0], [w - 1, y_right], [0, y_left]], dtype=np.int32)
                 cv2.fillPoly(mask, [poly_points], 1)
-
-                # --- QUALITY CONTROL ---
-                # Check if the mask is all zeros or all ones. If so, discard it.
                 if mask.min() == mask.max():
-                    # print(f"  - Discarding frame {frame_idx}: Mask is trivial (all {mask.min()}).")
-                    frame_idx += 1
-                    continue
-
+                    frame_idx += 1; continue
             except (IndexError, TypeError, KeyError, ValueError) as e:
-                frame_idx += 1
-                continue
-
-            # If debugging, store the frame and mask for visualization
-            if DEBUG_PREPROCESSING:
-                if len(debug_images) < 5: # Store up to 5 examples
-                    debug_images.append(frame)
-                    debug_masks.append(mask)
-
-            # Save the original frame and the generated mask
+                frame_idx += 1; continue
             frame_filename = f"{video_name_without_ext}_frame_{frame_idx:04d}.jpg"
             mask_filename = f"{video_name_without_ext}_frame_{frame_idx:04d}.png"
-
-            cv2.imwrite(os.path.join(PROCESSED_IMAGES_PATH, frame_filename), frame)
-            cv2.imwrite(os.path.join(PROCESSED_MASKS_PATH, mask_filename), mask)
-
+            cv2.imwrite(os.path.join(GDRIVE_PROCESSED_IMAGES_PATH, frame_filename), frame)
+            cv2.imwrite(os.path.join(GDRIVE_PROCESSED_MASKS_PATH, mask_filename), mask)
             frame_idx += 1
             processed_count += 1
-
         cap.release()
-
-        # If debugging, stop after the first video
-        if DEBUG_PREPROCESSING:
-            break
-
     print(f"Preprocessing complete. Total frames processed: {processed_count}")
 
-    # --- VISUALIZE DEBUG DATA ---
-    if DEBUG_PREPROCESSING and debug_images:
-        print("\n--- Preprocessing Debug Visualization ---")
-        fig, axes = plt.subplots(len(debug_images), 2, figsize=(10, len(debug_images) * 4))
-        fig.suptitle("Sample Frames and Generated Masks", fontsize=16)
-        for i in range(len(debug_images)):
-            # Display original frame
-            axes[i, 0].imshow(cv2.cvtColor(debug_images[i], cv2.COLOR_BGR2RGB))
-            axes[i, 0].set_title(f"Original Frame {i+1}")
-            axes[i, 0].axis('off')
-            # Display generated mask
-            axes[i, 1].imshow(debug_masks[i], cmap='gray')
-            axes[i, 1].set_title(f"Generated Mask {i+1}")
-            axes[i, 1].axis('off')
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.show()
-
-# Run preprocessing only if the directory is empty
-if len(os.listdir(PROCESSED_IMAGES_PATH)) == 0:
+# Check if the processed folder on Drive is empty. If so, run preprocessing.
+if not os.listdir(GDRIVE_PROCESSED_IMAGES_PATH):
+    print("Processed data not found on Google Drive. Running preprocessing. This may take a while.")
     preprocess_smd_for_segmentation()
 else:
-    print("Processed data already exists. Skipping preprocessing.")
+    print("Processed data found on Google Drive.")
+
+# --- Copy the entire folder from Drive to the local runtime ---
+if not os.path.exists(LOCAL_DATA_PATH):
+    print(f"Copying data from '{GDRIVE_PROCESSED_DATA_PATH}' to local runtime '{LOCAL_DATA_PATH}'...")
+    !cp -r "{GDRIVE_PROCESSED_DATA_PATH}" "{LOCAL_DATA_PATH}"
+    print("Data successfully copied to local runtime.")
+else:
+    print("Data already exists in local runtime. Skipping copy.")
 
 # ==============================================================================
-# Step 4: Create the Dataset for Segmentation
+# Step 4: Create the Dataset with Aggressive Data Augmentation
 # ==============================================================================
 IMG_SIZE = (256, 256)
-BATCH_SIZE = 8 # Smaller batch size for segmentation models due to memory usage
+BATCH_SIZE = 16
 
 class SegmentationDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, size):
-        self.images_dir = images_dir
+    def __init__(self, image_files, masks_dir, size, is_train=False):
+        self.image_files = image_files
         self.masks_dir = masks_dir
         self.size = size
-        self.image_files = sorted([f for f in os.listdir(images_dir) if f.endswith('.jpg')])
-
-        self.image_transform = transforms.Compose([
-            transforms.Resize(self.size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        self.mask_transform = transforms.Compose([
-            transforms.Resize(self.size, interpolation=transforms.InterpolationMode.NEAREST),
-            transforms.ToTensor()
-        ])
+        self.is_train = is_train
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        img_name = self.image_files[idx]
+        img_path = self.image_files[idx]
+        img_name = os.path.basename(img_path)
         mask_name = img_name.replace('.jpg', '.png')
-
-        img_path = os.path.join(self.images_dir, img_name)
         mask_path = os.path.join(self.masks_dir, mask_name)
 
         image = Image.open(img_path).convert("RGB")
-        mask = Image.open(mask_path)
+        mask = Image.open(mask_path).convert("L") # --- CHANGE: Ensure mask is single channel
 
-        image = self.image_transform(image)
-        mask = self.mask_transform(mask)
+        # Resize first
+        image = TF.resize(image, self.size)
+        mask = TF.resize(mask, self.size, interpolation=TF.InterpolationMode.NEAREST)
 
-        return image, mask.squeeze(0).long()
+        if self.is_train:
+            # Random horizontal flip
+            if random.random() > 0.5:
+                image = TF.hflip(image)
+                mask = TF.hflip(mask)
 
-full_dataset = SegmentationDataset(PROCESSED_IMAGES_PATH, PROCESSED_MASKS_PATH, IMG_SIZE)
+            # Random affine transformation (rotation, translation, scale, shear)
+            angle = random.uniform(-15, 15)
+            translate = (random.uniform(0, 0.1 * self.size[0]), random.uniform(0, 0.1 * self.size[1]))
+            scale = random.uniform(0.9, 1.1)
+            shear = random.uniform(-10, 10)
+            image = TF.affine(image, angle, translate, scale, shear, fill=0)
+            mask = TF.affine(mask, angle, translate, scale, shear, fill=0)
 
-if len(full_dataset) > 0:
-    train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+            # Color jitter (only on the image)
+            if random.random() > 0.5:
+                image = TF.adjust_brightness(image, brightness_factor=random.uniform(0.7, 1.3))
+                image = TF.adjust_contrast(image, contrast_factor=random.uniform(0.7, 1.3))
+                image = TF.adjust_saturation(image, saturation_factor=random.uniform(0.7, 1.3))
+                image = TF.adjust_hue(image, hue_factor=random.uniform(-0.1, 0.1))
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+        # Convert to tensor and normalize
+        image = TF.to_tensor(image)
+        # --- CHANGE: Convert mask to tensor before normalization
+        mask_np = np.array(mask)
+        mask_tensor = torch.from_numpy(mask_np).long()
 
-    print(f"\nDataset loaded: {len(full_dataset)} images.")
-    print(f"Training set: {len(train_dataset)}, Validation set: {len(val_dataset)}")
+        image = TF.normalize(image, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+        return image, mask_tensor
+
+# --- Implement Video-Based Splitting using LOCAL paths ---
+all_image_files = sorted([os.path.join(LOCAL_IMAGES_PATH, f) for f in os.listdir(LOCAL_IMAGES_PATH) if f.endswith('.jpg')])
+
+if all_image_files:
+    video_groups = collections.defaultdict(list)
+    for f in all_image_files:
+        prefix = '_'.join(os.path.basename(f).split('_')[:-2])
+        video_groups[prefix].append(f)
+
+    unique_videos = list(video_groups.keys())
+    random.seed(42) # for reproducibility
+    random.shuffle(unique_videos)
+
+    split_idx_1 = int(0.8 * len(unique_videos))
+    # --- CHANGE: Create a test set for final evaluation
+    split_idx_2 = int(0.9 * len(unique_videos))
+    train_videos = unique_videos[:split_idx_1]
+    val_videos = unique_videos[split_idx_1:split_idx_2]
+    test_videos = unique_videos[split_idx_2:]
+
+
+    train_files = [f for video in train_videos for f in video_groups[video]]
+    val_files = [f for video in val_videos for f in video_groups[video]]
+    test_files = [f for video in test_videos for f in video_groups[video]]
+
+    train_dataset = SegmentationDataset(train_files, LOCAL_MASKS_PATH, IMG_SIZE, is_train=True)
+    val_dataset = SegmentationDataset(val_files, LOCAL_MASKS_PATH, IMG_SIZE, is_train=False)
+    test_dataset = SegmentationDataset(test_files, LOCAL_MASKS_PATH, IMG_SIZE, is_train=False)
+
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+
+
+    print(f"\nDataset loaded from local runtime and split by video.")
+    print(f"Total videos: {len(unique_videos)} -> Train: {len(train_videos)}, Val: {len(val_videos)}, Test: {len(test_videos)}")
+    print(f"Total frames: {len(all_image_files)} -> Train: {len(train_files)}, Val: {len(val_files)}, Test: {len(test_files)}")
 else:
     print("\n--- ERROR: Dataset is empty ---")
 
+
 # ==============================================================================
-# Step 5: Define U-Net Model and Training Loop
+# Step 5: Define U-Net Model, New Loss, and Training Loop
 # ==============================================================================
 class UNet(nn.Module):
-    def __init__(self, n_classes=2):
+    def __init__(self, n_classes=2, dropout_rate=0.3): # --- CHANGE: Added dropout
         super().__init__()
         self.n_classes = n_classes
 
-        # Encoder (using ResNet-18)
         resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
         self.base_layers = list(resnet.children())
-        self.layer0 = nn.Sequential(*self.base_layers[:3]) # 64 channels
-        self.layer1 = nn.Sequential(*self.base_layers[3:5]) # 64 channels
-        self.layer2 = self.base_layers[5] # 128 channels
-        self.layer3 = self.base_layers[6] # 256 channels
-        self.layer4 = self.base_layers[7] # 512 channels
+        self.layer0 = nn.Sequential(*self.base_layers[:3]) # size: 128
+        self.layer1 = nn.Sequential(*self.base_layers[3:5]) # size: 64
+        self.layer2 = self.base_layers[5] # size: 32
+        self.layer3 = self.base_layers[6] # size: 16
+        self.layer4 = self.base_layers[7] # size: 8
 
-        # Decoder
         self.upconv4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec4 = self.conv_block(256 + 256, 256)
-
+        self.dec4 = self.conv_block(256 + 256, 256, dropout_rate) # --- CHANGE: Added dropout
         self.upconv3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec3 = self.conv_block(128 + 128, 128)
-
+        self.dec3 = self.conv_block(128 + 128, 128, dropout_rate) # --- CHANGE: Added dropout
         self.upconv2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = self.conv_block(64 + 64, 64)
-
+        self.dec2 = self.conv_block(64 + 64, 64, dropout_rate)   # --- CHANGE: Added dropout
         self.upconv1 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
-        self.dec1 = self.conv_block(64 + 64, 32)
-
+        # --- CHANGE: Corrected skip connection channel size from layer0 ---
+        self.dec1 = self.conv_block(64 + 64, 32) # No dropout on last block
         self.final_upconv = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
         self.final_conv = nn.Conv2d(32, n_classes, kernel_size=1)
 
-    def conv_block(self, in_channels, out_channels):
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+    # --- CHANGE: Added dropout_rate parameter ---
+    def conv_block(self, in_channels, out_channels, dropout_rate=0.0):
+        layers = [
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels), # --- CHANGE: Added BatchNorm
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels), # --- CHANGE: Added BatchNorm
             nn.ReLU(inplace=True)
-        )
+        ]
+        if dropout_rate > 0:
+            layers.append(nn.Dropout(dropout_rate)) # --- CHANGE: Added Dropout layer
+        return nn.Sequential(*layers)
 
     def forward(self, x):
         # Encoder
-        x0 = self.layer0(x)
-        x1 = self.layer1(x0)
+        x0_pool = self.layer0(x)
+        x1 = self.layer1(x0_pool)
         x2 = self.layer2(x1)
         x3 = self.layer3(x2)
         x4 = self.layer4(x3)
@@ -324,30 +331,77 @@ class UNet(nn.Module):
         d2 = self.dec2(d2)
 
         d1 = self.upconv1(d2)
-        d1 = torch.cat([d1, x0], dim=1)
+        # --- CHANGE: Corrected skip connection from x0_pool ---
+        d1 = torch.cat([d1, x0_pool], dim=1)
         d1 = self.dec1(d1)
 
-        out = self.final_upconv(d1)
-        return self.final_conv(out)
+        d0 = self.final_upconv(d1)
+        return self.final_conv(d0)
 
-model = UNet(n_classes=2).to(device)
+
+# --- FIX: Define Dice Loss and IoU Metric ---
+class DiceLoss(nn.Module):
+    def __init__(self, smooth=1e-6):
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+
+    def forward(self, logits, targets):
+        # Apply softmax to get probabilities
+        probs = F.softmax(logits, dim=1)
+        # We are interested in the 'sky' class (class 1)
+        probs_sky = probs[:, 1, :, :]
+        targets_sky = (targets == 1).float()
+
+        intersection = (probs_sky * targets_sky).sum()
+        dice_coeff = (2. * intersection + self.smooth) / (probs_sky.sum() + targets_sky.sum() + self.smooth)
+
+        return 1 - dice_coeff
+
+def iou_score(outputs, masks):
+    # --- CHANGE: Ensure masks are on the same device as outputs ---
+    masks = masks.to(outputs.device)
+    preds = torch.argmax(outputs, dim=1)
+    intersection = ((preds == 1) & (masks == 1)).float().sum()
+    union = ((preds == 1) | (masks == 1)).float().sum()
+    iou = (intersection + 1e-6) / (union + 1e-6)
+    return iou.item()
+
+model = UNet(n_classes=2, dropout_rate=0.3).to(device)
 
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 25
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+NUM_EPOCHS = 50 # Increased epochs, but will use early stopping
+# --- CHANGE: Added weight decay for regularization ---
+WEIGHT_DECAY = 1e-5
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs):
-    print("\n--- Starting U-Net Training ---")
-    best_loss = float('inf')
+criterion_ce = nn.CrossEntropyLoss()
+criterion_dice = DiceLoss()
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+# --- CHANGE: Added a learning rate scheduler ---
+scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=5, verbose=True)
+
+def train_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs):
+    print("\n--- Starting U-Net Training with Regularization & Early Stopping ---")
+    best_iou = 0.0
+    # --- CHANGE: Added early stopping mechanism ---
+    patience = 10
+    epochs_no_improve = 0
+    best_val_loss = float('inf')
+    # --- CHANGE: Corrected model save path ---
+    model_save_path = os.path.join(GDRIVE_MODEL_SAVE_PATH, 'best_unet_smd.pth')
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
         for images, masks in train_loader:
-            images, masks = images.to(device), masks.to(device)
+            images, masks = images.to(device), masks.to(device, dtype=torch.long)
             optimizer.zero_grad()
             outputs = model(images)
-            loss = criterion(outputs, masks)
+
+            # Combined Loss
+            loss_ce = criterion_ce(outputs, masks)
+            loss_dice = criterion_dice(outputs, masks)
+            loss = 0.5 * loss_ce + 0.5 * loss_dice # --- CHANGE: Balanced the two losses
+
             loss.backward()
             optimizer.step()
             running_loss += loss.item() * images.size(0)
@@ -356,32 +410,52 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
         model.eval()
         val_loss = 0.0
+        val_iou = 0.0
         with torch.no_grad():
             for images, masks in val_loader:
-                images, masks = images.to(device), masks.to(device)
+                images, masks = images.to(device), masks.to(device, dtype=torch.long)
                 outputs = model(images)
-                loss = criterion(outputs, masks)
+                loss_ce = criterion_ce(outputs, masks)
+                loss_dice = criterion_dice(outputs, masks)
+                loss = 0.5 * loss_ce + 0.5 * loss_dice
                 val_loss += loss.item() * images.size(0)
+                # --- CHANGE: Calculate IoU per batch for a more accurate average ---
+                for i in range(images.size(0)):
+                    val_iou += iou_score(outputs[i].unsqueeze(0), masks[i].unsqueeze(0))
+
 
         val_loss /= len(val_loader.dataset)
-        print(f"Epoch {epoch+1}/{num_epochs} -> Train Loss: {epoch_loss:.4f}, Val Loss: {val_loss:.4f}")
+        val_iou /= len(val_loader.dataset) # Average IoU across all validation images
+        print(f"Epoch {epoch+1}/{num_epochs} -> Train Loss: {epoch_loss:.4f}, Val Loss: {val_loss:.4f}, Val IoU: {val_iou:.4f}")
 
-        if val_loss < best_loss:
-            best_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(BASE_DRIVE_PATH, 'best_unet_model_smd.pth'))
-            print(f"  -> Model saved with new best validation loss: {best_loss:.4f}")
+        # --- CHANGE: Update scheduler and check for early stopping ---
+        scheduler.step(val_loss)
 
-    print("--- Finished Training ---")
+        if val_iou > best_iou:
+            best_iou = val_iou
+            torch.save(model.state_dict(), model_save_path)
+            print(f"  -> Model saved with new best validation IoU: {best_iou:.4f}")
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
 
-if 'train_loader' in locals() and len(full_dataset) > 0:
-    train_model(model, train_loader, val_loader, criterion, optimizer, NUM_EPOCHS)
+        if epochs_no_improve >= patience:
+            print(f"--- Early stopping triggered after {patience} epochs with no improvement. ---")
+            break
+
+    print(f"--- Finished Training. Best validation IoU: {best_iou:.4f} ---")
+    print(f"Best model saved to: {model_save_path}")
 
 # ==============================================================================
 # Step 6: Visualization for Segmentation
 # ==============================================================================
 def visualize_segmentation(model, loader, num_images=5):
     model.eval()
-    images, masks = next(iter(loader))
+    try:
+        images, masks = next(iter(loader))
+    except StopIteration:
+        print("Cannot visualize. The data loader is empty.")
+        return
     images, masks = images.to(device), masks.to(device)
 
     with torch.no_grad():
@@ -393,17 +467,16 @@ def visualize_segmentation(model, loader, num_images=5):
     sky_color = np.array([0, 0, 255]) # Blue for sky
 
     fig, axes = plt.subplots(num_images, 2, figsize=(12, num_images * 4))
+    if num_images == 1: axes = np.array([axes]) # Ensure axes is iterable for single image
     fig.suptitle("Ground Truth vs. Model Prediction", fontsize=16)
 
-    for i in range(num_images):
-        # Un-normalize image for display
+    for i in range(min(num_images, len(images))):
         img_tensor = images[i]
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
         std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
         img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy()
         img_display = np.clip(img_display, 0, 1)
 
-        # --- Ground Truth ---
         gt_mask = masks[i].cpu().numpy()
         gt_overlay = np.zeros_like(img_display)
         gt_overlay[gt_mask == 1] = sky_color / 255.0
@@ -412,7 +485,6 @@ def visualize_segmentation(model, loader, num_images=5):
         axes[i, 0].set_title("Ground Truth")
         axes[i, 0].axis('off')
 
-        # --- Prediction ---
         pred_mask = preds[i]
         pred_overlay = np.zeros_like(img_display)
         pred_overlay[pred_mask == 1] = sky_color / 255.0
@@ -424,7 +496,18 @@ def visualize_segmentation(model, loader, num_images=5):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-if 'val_loader' in locals() and len(full_dataset) > 0:
-    # Load the best model for visualization
-    model.load_state_dict(torch.load(os.path.join(BASE_DRIVE_PATH, 'best_unet_model_smd.pth')))
-    visualize_segmentation(model, val_loader)
+# --- Main Execution Block ---
+if 'train_loader' in locals() and 'val_loader' in locals():
+    # Train the model
+    train_model(model, train_loader, val_loader, optimizer, scheduler, NUM_EPOCHS)
+
+    # Load the best model and visualize results on the validation set
+    best_model_path = os.path.join(GDRIVE_MODEL_SAVE_PATH, 'best_unet_smd.pth')
+    if os.path.exists(best_model_path):
+        print("\n--- Visualizing results with the best model on the Validation Set ---")
+        model.load_state_dict(torch.load(best_model_path))
+        visualize_segmentation(model, val_loader)
+    else:
+        print("\n--- No saved model found to visualize. ---")
+else:
+    print("\n--- ERROR: Training skipped because dataset was not loaded ---")
