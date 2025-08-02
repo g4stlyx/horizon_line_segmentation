@@ -133,6 +133,86 @@ def create_overlay(image, mask):
     
     return viz_image
 
+def detect_ships_for_correction(image_cv, mask):
+    """
+    Detect ships that were incorrectly classified as sky and correct them.
+    """
+    h, w = image_cv.shape[:2]
+    corrected_mask = mask.copy()
+    
+    # Convert to different color spaces for ship detection
+    gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(image_cv, cv2.COLOR_BGR2HSV)
+    
+    # Find the approximate horizon line from the current mask
+    sky_rows = np.where(np.any(mask == 1, axis=1))[0]
+    if len(sky_rows) > 0:
+        horizon_y = np.max(sky_rows)  # Bottom edge of sky region
+    else:
+        horizon_y = h // 2  # Fallback
+    
+    # Search for ships in the sky region (incorrectly classified)
+    search_top = max(0, horizon_y - 100)
+    search_bottom = horizon_y + 20
+    
+    # Method 1: Detect dark objects (ship hulls)
+    roi_gray = gray[search_top:search_bottom, :]
+    if roi_gray.size > 0:
+        # Use adaptive thresholding to find dark objects
+        thresh = cv2.adaptiveThreshold(roi_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                     cv2.THRESH_BINARY, 21, 10)
+        
+        # Find dark regions (ships are typically dark silhouettes)
+        dark_regions = 255 - thresh
+        
+        # Clean up with morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        dark_regions = cv2.morphologyEx(dark_regions, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours and filter by size
+        contours, _ = cv2.findContours(dark_regions, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > 200:  # Minimum ship size
+                x, y, cw, ch = cv2.boundingRect(contour)
+                # Check aspect ratio (ships are usually wider than tall)
+                aspect_ratio = cw / ch if ch > 0 else 0
+                if aspect_ratio > 1.2 and area > 500:
+                    # Correct this region to non-sky (0)
+                    corrected_mask[search_top + y:search_top + y + ch, x:x + cw] = 0
+    
+    # Method 2: Color-based ship detection
+    roi_hsv = hsv[search_top:search_bottom, :]
+    if roi_hsv.size > 0:
+        # Detect typical ship colors
+        # White/light structures (superstructures)
+        white_lower = np.array([0, 0, 180])
+        white_upper = np.array([180, 30, 255])
+        white_mask = cv2.inRange(roi_hsv, white_lower, white_upper)
+        
+        # Dark structures (hulls)  
+        dark_lower = np.array([0, 0, 0])
+        dark_upper = np.array([180, 255, 80])
+        dark_mask_color = cv2.inRange(roi_hsv, dark_lower, dark_upper)
+        
+        # Combine color masks
+        color_mask = cv2.bitwise_or(white_mask, dark_mask_color)
+        
+        # Clean up
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours and correct mask
+        contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > 300:
+                x, y, cw, ch = cv2.boundingRect(contour)
+                # Correct this region to non-sky (0)
+                corrected_mask[search_top + y:search_top + y + ch, x:x + cw] = 0
+    
+    return corrected_mask
+
 def predict(model, image, device, transform):
     """Runs a single prediction on a PIL image and returns the mask."""
     original_size = image.size
@@ -148,7 +228,13 @@ def predict(model, image, device, transform):
     mask_transform = transforms.Resize(original_size[::-1], interpolation=transforms.InterpolationMode.NEAREST)
     mask_resized = mask_transform(preds.unsqueeze(0)).squeeze(0)
     
-    return mask_resized.numpy()
+    mask_np = mask_resized.numpy()
+    
+    # Apply ship-aware correction
+    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    corrected_mask = detect_ships_for_correction(image_cv, mask_np)
+    
+    return corrected_mask
 
 # --- Main Setup ---
 parser = argparse.ArgumentParser(description="Horizon Segmentation Inference")
@@ -164,7 +250,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # --- Load Model ---
-MODEL_PATH = '1.0best_unet_smd.pth'
+MODEL_PATH = '1.1best_unet_ship_aware_smd.pth'
 model = UNet(n_classes=2).to(device)
 try:
     model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
