@@ -1,22 +1,98 @@
+# TODO
+
 * sonuç odaklı git, bir videoda (tercihen çok temiz olmayan-sisli, güneş parlamalı vs.-, youtube'dan rastgele alınmış bir video) sonucu gösterebil.
-* modelin tüm frame'leri tek tek işlemesi yerine performans ve fps kazanmak için bir frame'de segmentasyon yapıp sonucu diğer frame'lere aktarıp kullanmayı dene.
-* gemi gibi objelerin merkezlerinin ufuk çizgisine olan uzaklığını bul (bunun için yolov8 gibi bir obj. detection modeli gerekebilir, 'şirket'in modeli de burada kullanılabilir.)
 
-<hr>
+## Preprocessing update for a way better ship-aware hld
+* ship-aware hld ve segmentasyon için: 
+    * eğitim öncesi data hazırlığı yapılırken YOLO veya RT-DETR vs. tabanlı, bizim oluşturduğumuz modellerle ship-aware maskeler içeren bir dataset çıkar. 
+    * preprocess kodunda color-based vs. gemi detect yerine bu modelle gemileri tespit etsin, ona göre mask oluştursun.
 
-Gemi Gibi Yapıların Ufuk Çizgisine Uzaklığını Bulma
-Sunumda anlatılanlara ek olarak, tespit edilen ufuk çizgisini kullanarak diğer gemilerin veya nesnelerin uzaklığını nasıl tahmin edebileceğimizi şu şekilde açıklayabilirsiniz:
+## Efficient Video Processing: Avoiding Redundant Frame-by-Frame Analysis
+`` modelin tüm frame'leri tek tek işlemesi yerine performans ve fps kazanmak için bir frame'de segmentasyon yapıp sonucu diğer frame'lere aktarıp kullanmayı dene. ``
 
-Bu işlem için iki temel adıma ihtiyacımız var: Nesne Tespiti ve Geometrik Analiz.
+Running a heavy segmentation model on every single frame of a video is often unnecessary and computationally expensive. The horizon line in a maritime setting typically moves slowly and predictably. You can achieve a significant performance boost by running the U-Net model intermittently and using a simpler method to update the horizon for the frames in between.
 
-Nesne Tespiti: Öncelikle, YOLOv8-seg veya benzeri bir nesne tanıma modeli kullanarak görüntüdeki diğer gemileri tespit etmemiz gerekir. Bu model bize geminin konumunu bir sınırlayıcı kutu (bounding box) içinde verir.
+A straightforward and effective strategy is to run the U-Net prediction at a set interval (e.g., every 10 frames) and simply reuse the last known mask for the intermediate frames.
 
-Referans Olarak Ufuk Çizgisi: Ufuk çizgisi, sonsuzdaki bir referans noktasıdır. Kamera sabit bir yükseklikte olduğu sürece, görüntüdeki bir nesnenin ufuk çizgisine olan dikey mesafesi, o nesnenin bize olan gerçek uzaklığıyla ters orantılıdır. Yani, bir geminin alt kısmı ufuk çizgisine ne kadar yakınsa, o gemi o kadar uzaktadır. Geminin alt kısmı görüntüde ne kadar aşağıdaysa (ufuk çizgisinden ne kadar uzaksa), o gemi o kadar yakındır.
+code:
 
-Mesafe Tahmini:
+    elif args.video or args.camera:
+        # --- Process a video file or camera feed ---
+        if args.video:
+            cap = cv2.VideoCapture(args.video)
+        else: # args.camera
+            cap = cv2.VideoCapture(0)
 
-Kalibrasyonsuz (Göreceli) Tahmin: En basit yöntem, "Gemi A, Gemi B'den daha yakında" gibi göreceli tahminler yapmaktır. Bu, sadece nesnelerin ufuk çizgisine olan piksel mesafelerini karşılaştırarak yapılabilir.
+        if not cap.isOpened():
+            print("Error: Could not open video source.")
+            exit()
+            
+        video_writer = None
+        if args.save:
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            save_path = "output_segmented.mp4"
+            video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
+            print(f"Saving output video to {save_path}")
 
-Kalibrasyonlu (Metrik) Tahmin: Eğer kameranın yerden (deniz seviyesinden) yüksekliği (h) ve odak uzaklığı gibi içsel parametreleri biliniyorsa, basit trigonometri kullanarak piksel mesafesini metre cinsinden yaklaşık bir uzaklığa çevirmek mümkündür. Bu, "pinhole kamera modeli" ve üçgen benzerliği kullanılarak formüle edilebilir. Bu yöntem, otonom sistemlerin çarpışma önleme (collision avoidance) manevraları için kritik öneme sahiptir.
+        print("Processing video with interval-based prediction. Press 'q' to quit.")
 
-Kısacası, ufuk çizgisi segmentasyonu ve nesne tanımayı birleştirdiğimizde, sadece "orada bir gemi var" demekle kalmaz, aynı zamanda o geminin yaklaşık olarak ne kadar uzakta olduğunu da anlayabiliriz.
+        # --- NEW: Frame processing optimization ---
+        frame_count = 0
+        PROCESS_INTERVAL = 10  # Run the U-Net model every 10 frames
+        last_mask = None
+        # ----------------------------------------
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret: break
+
+            start_time = time.time()
+            
+            # Only run the full prediction pipeline at the specified interval
+            if frame_count % PROCESS_INTERVAL == 0:
+                frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                mask = predict(model, frame_pil, device, transform)
+                last_mask = mask  # Cache the new mask
+            else:
+                # For intermediate frames, reuse the last calculated mask
+                mask = last_mask
+
+            # Ensure we have a mask to work with
+            if last_mask is not None:
+                result_frame = create_overlay(frame, mask)
+            else:
+                # If no mask yet, just show the original frame
+                result_frame = frame
+
+            frame_count += 1
+            
+            end_time = time.time()
+            fps = 1 / (end_time - start_time)
+            cv2.putText(result_frame, f"FPS: {fps:.2f}", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            
+            if video_writer:
+                video_writer.write(result_frame)
+
+            cv2.imshow('Horizon Segmentation', result_frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        if video_writer:
+            video_writer.release()
+        cv2.destroyAllWindows()
+
+
+## How can I calculate the distance to detected objects?
+`` gemi, şamandıra gibi objelerin merkezlerinin ufuk çizgisine olan uzaklığını bul ``
+
+* add a new function to your inference script that:
+    * Derives a simplified horizon line from the U-Net's mask.
+    * Finds the contours of ships (using the existing detect_ships_for_correction logic or a separate detector).
+    * Calculates the vertical pixel distance between the horizon and the center of each ship.
+    * Draws this information onto the output frame.
