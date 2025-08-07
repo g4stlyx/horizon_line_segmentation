@@ -329,6 +329,58 @@ elif args.folder:
             print(f"Could not process {image_path}. Error: {e}")
     cv2.destroyAllWindows()
 
+#! processes every frame, removed to improve the performance and FPS (approximately 20->45)
+# elif args.video or args.camera:
+#     # --- Process a video file or camera feed ---
+#     if args.video:
+#         cap = cv2.VideoCapture(args.video)
+#     else: # args.camera
+#         cap = cv2.VideoCapture(0)
+
+#     if not cap.isOpened():
+#         print("Error: Could not open video source.")
+#         exit()
+        
+#     video_writer = None
+#     if args.save:
+#         # Get video properties for the writer
+#         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+#         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+#         fps = cap.get(cv2.CAP_PROP_FPS)
+#         fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Or 'XVID'
+#         save_path = "output_segmented.mp4"
+#         video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
+#         print(f"Saving output video to {save_path}")
+
+#     print("Processing video. Press 'q' to quit.")
+    
+#     while True:
+#         ret, frame = cap.read()
+#         if not ret: break
+
+#         start_time = time.time()
+        
+#         frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+#         mask = predict(model, frame_pil, device, transform)
+#         result_frame = create_overlay(frame, mask)
+
+#         end_time = time.time()
+#         fps = 1 / (end_time - start_time)
+#         cv2.putText(result_frame, f"FPS: {fps:.2f}", (10, 30), 
+#                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+#         if video_writer:
+#             video_writer.write(result_frame)
+
+#         cv2.imshow('Horizon Segmentation', result_frame)
+
+#         if cv2.waitKey(1) & 0xFF == ord('q'):
+#             break
+
+#     cap.release()
+#     if video_writer:
+#         video_writer.release()
+#     cv2.destroyAllWindows()
 
 elif args.video or args.camera:
     # --- Process a video file or camera feed ---
@@ -343,16 +395,21 @@ elif args.video or args.camera:
         
     video_writer = None
     if args.save:
-        # Get video properties for the writer
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Or 'XVID'
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         save_path = "output_segmented.mp4"
         video_writer = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
         print(f"Saving output video to {save_path}")
 
-    print("Processing video. Press 'q' to quit.")
+    print("Processing video with interval-based prediction. Press 'q' to quit.")
+
+    # --- NEW: Frame processing optimization ---
+    frame_count = 0
+    PROCESS_INTERVAL = 10  # Run the U-Net model every 10 frames
+    last_mask = None
+    # ----------------------------------------
     
     while True:
         ret, frame = cap.read()
@@ -360,10 +417,24 @@ elif args.video or args.camera:
 
         start_time = time.time()
         
-        frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        mask = predict(model, frame_pil, device, transform)
-        result_frame = create_overlay(frame, mask)
+        # Only run the full prediction pipeline at the specified interval
+        if frame_count % PROCESS_INTERVAL == 0:
+            frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            mask = predict(model, frame_pil, device, transform)
+            last_mask = mask  # Cache the new mask
+        else:
+            # For intermediate frames, reuse the last calculated mask
+            mask = last_mask
 
+        # Ensure we have a mask to work with
+        if last_mask is not None:
+            result_frame = create_overlay(frame, mask)
+        else:
+            # If no mask yet, just show the original frame
+            result_frame = frame
+
+        frame_count += 1
+        
         end_time = time.time()
         fps = 1 / (end_time - start_time)
         cv2.putText(result_frame, f"FPS: {fps:.2f}", (10, 30), 
