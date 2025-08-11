@@ -16,7 +16,10 @@ Key Arguments:
 
 ? HF RT-DETR model from Baris:
 ! final_best_model (clean, no optimizer/scheduler)
-! py z_unet_runner_dist_calc_rtdetr_obj_det.py --video .\0example_data\VIS_Onshore\Videos\MVI_1614_VIS.avi --rtdetr-model rtdetr_obj_det_model\final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 --band-up 160 --band-down 140 --min-area 350 --show-horizon
+* on videos
+! py z_unet_runner_dist_calc_rtdetr_obj_det.py --video .\0example_data\VIS_Onshore\Videos\MVI_1614_VIS.avi --rtdetr-model rtdetr_obj_det_model\final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 --band-up 160 --band-down 140 --min-area 350 --show-horizon --save
+* on images
+! py z_unet_runner_dist_calc_rtdetr_obj_det.py --image .\0example_data\images\image.jpeg --rtdetr-model rtdetr_obj_det_model\final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 --band-up 160 --band-down 140 --min-area 350 --show-horizon --save
 
 """
 
@@ -461,7 +464,7 @@ def append_csv_rows(csv_path, rows):
 
 def main():
     parser = argparse.ArgumentParser(description='U-Net Horizon Distance Calculator')
-    parser.add_argument('--model-path', type=str, default='1.2best_unet_yolo_aware_smd.pth', help='Path to trained U-Net weights')
+    parser.add_argument('--model-path', type=str, default='1.3best_unet_rtdetr_aware_smd.pth', help='Path to trained U-Net weights')
     parser.add_argument('--image', type=str, help='Single image path')
     parser.add_argument('--folder', type=str, help='Folder of images')
     parser.add_argument('--video', type=str, help='Video file path')

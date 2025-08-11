@@ -3,6 +3,7 @@
 * sonuç odaklı git, bir videoda (tercihen çok temiz olmayan-sisli, güneş parlamalı vs.-, youtube'dan rastgele alınmış bir video) sonucu gösterebil.
 
 ## Preprocessing update for a way better ship-aware hld
+`` DONE, using the same RT-DETR obj. det. model taken from barissglc``
 * ship-aware hld ve segmentasyon için: 
     * eğitim öncesi data hazırlığı yapılırken YOLO veya RT-DETR vs. tabanlı, bizim oluşturduğumuz modellerle ship-aware maskeler içeren bir dataset çıkar. 
     * preprocess kodunda color-based vs. gemi detect yerine bu modelle gemileri tespit etsin, ona göre mask oluştursun.
