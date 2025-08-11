@@ -37,10 +37,11 @@
 *.gif
 
 # Model files - large binary files should not be in git
-# *.pth
-# *.pkl
-# *.h5
-# *.onnx
+*.pth
+*.pt
+*.pkl
+*.h5
+*.onnx
 *.model
 *.weights
 
