@@ -21,3 +21,15 @@ A straightforward and effective strategy is to run the U-Net prediction at a set
 `` gemi, şamandıra gibi objelerin merkezlerinin ufuk çizgisine olan uzaklığını bul `` <br>
 
 `` DONE using a HF RT-DETR object detection model taken from barissglc. Since a second, heavy model is used beside my unet segmentation model, we got an FPS drop from ~40 to ~15 tho.``
+
+## Performance Improvements
+
+Using U-Net + RT-DETR in the runner code for distance calculation made the app a lot heavier then it is used to be (40 FPS -> 10 FPS), find a way to increase the FPS.
+
+## New Classes on Segmentation Masks
+
+0: Sky, 1: Sea, 2: Ship/Obstacle, 3: Land/coastal
+
+## Distance to the Horizon Line Calculation Improvements
+
+Calculate the distance between horizon line and the center of the object in sea mile/kilometer instead of a pixel-based calculation.
