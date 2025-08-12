@@ -34,6 +34,7 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 from torchvision.models.resnet import ResNet18_Weights
 from PIL import Image
+import torch.backends.cudnn as cudnn
 import cv2
 import numpy as np
 import argparse
@@ -193,11 +194,16 @@ def detect_ships_for_correction(image_cv, mask):
     
     return corrected_mask
 
-def predict(model, image_pil, device, transform, apply_ship_correction=True):
+def predict(model, image_pil, device, transform, apply_ship_correction=True, use_fp16=False):
     orig_size = image_pil.size
     tensor = transform(image_pil).unsqueeze(0).to(device)
-    with torch.no_grad():
-        out = model(tensor)
+    with torch.inference_mode():
+        if use_fp16 and device.type == 'cuda':
+            # Mixed precision: keep weights in fp32, run ops in fp16 where safe
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                out = model(tensor)
+        else:
+            out = model(tensor)
     pred = torch.argmax(out, 1).cpu().squeeze(0)
     resize_back = transforms.Resize(orig_size[::-1], interpolation=transforms.InterpolationMode.NEAREST)
     mask = resize_back(pred.unsqueeze(0)).squeeze(0).numpy()
@@ -221,35 +227,35 @@ def compute_horizon_line(mask, gap_threshold=15, smooth_window=21):
     h, w = mask.shape
     horizon = np.full(w, np.nan, dtype=np.float32)
 
-    for col in range(w):
-        col_vals = mask[:, col]
-        sky_rows = np.where(col_vals == 1)[0]
-        water_rows = np.where(col_vals == 0)[0]
+    sky = (mask == 1)
+    water = (mask == 0)
 
-        y_sky_bottom = int(sky_rows.max()) if sky_rows.size > 0 else None
-        y_water_top = int(water_rows.min()) if water_rows.size > 0 else None
+    # Vectorized bottom-most sky index per column
+    sky_any = sky.any(axis=0)
+    sky_rev = sky[::-1, :]
+    sky_bottom_from_bottom = np.argmax(sky_rev, axis=0)
+    y_sky_bottom = (h - 1 - sky_bottom_from_bottom).astype(np.float32)
+    y_sky_bottom[~sky_any] = np.nan
 
-        if y_sky_bottom is not None and y_water_top is not None:
-            # If there is an object occluding between sky and water, the gap can be large
-            gap = y_water_top - y_sky_bottom
-            if gap >= 0:
-                if gap <= gap_threshold:
-                    horizon[col] = 0.5 * (y_sky_bottom + y_water_top)
-                else:
-                    # Large occlusion span -> mark invalid and interpolate later
-                    horizon[col] = np.nan
-            else:
-                # Overlap due to noise; choose the average anyway
-                horizon[col] = 0.5 * (y_sky_bottom + y_water_top)
-        elif y_sky_bottom is not None:
-            # Only sky present -> take bottom-most sky as horizon estimate
-            horizon[col] = float(y_sky_bottom)
-        elif y_water_top is not None:
-            # Only water present -> take top-most water as horizon estimate
-            horizon[col] = float(y_water_top)
-        else:
-            # Neither sky nor water (unlikely) -> leave NaN to be interpolated
-            horizon[col] = np.nan
+    # Vectorized top-most water index per column
+    water_any = water.any(axis=0)
+    y_water_top = np.argmax(water, axis=0).astype(np.float32)
+    y_water_top[~water_any] = np.nan
+
+    # Compute gaps and candidates
+    both_valid = ~np.isnan(y_sky_bottom) & ~np.isnan(y_water_top)
+    gap = np.full(w, np.nan, dtype=np.float32)
+    gap[both_valid] = y_water_top[both_valid] - y_sky_bottom[both_valid]
+
+    # Average where the gap is small and non-negative
+    good_gap = (gap >= 0) & (gap <= gap_threshold)
+    horizon[good_gap] = 0.5 * (y_sky_bottom[good_gap] + y_water_top[good_gap])
+
+    # Fallbacks where only one side is available
+    only_sky = ~np.isnan(y_sky_bottom) & np.isnan(y_water_top)
+    only_water = np.isnan(y_sky_bottom) & ~np.isnan(y_water_top)
+    horizon[only_sky] = y_sky_bottom[only_sky]
+    horizon[only_water] = y_water_top[only_water]
 
     # Interpolate NaNs from nearest valid neighbors
     xs = np.arange(w)
@@ -269,14 +275,13 @@ def compute_horizon_line(mask, gap_threshold=15, smooth_window=21):
         # Fallback if all NaN
         horizon[:] = h // 2
 
-    # Moving average smoothing
-    k = max(3, smooth_window | 1)  # make odd
+    # Moving average smoothing via convolution
+    k = int(max(3, smooth_window | 1))  # make odd
+    kernel = np.ones(k, dtype=np.float32) / float(k)
+    # Pad by edge values to preserve endpoints
     pad = k // 2
-    smoothed = horizon.copy()
-    for i in range(w):
-        l = max(0, i - pad)
-        r = min(w, i + pad + 1)
-        smoothed[i] = np.mean(horizon[l:r])
+    padded = np.pad(horizon, (pad, pad), mode='edge')
+    smoothed = np.convolve(padded, kernel, mode='valid')
     return horizon.astype(np.int32), smoothed.astype(np.int32)
 
 def detect_objects_near_horizon(
@@ -551,6 +556,8 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    if device.type == 'cuda':
+        cudnn.benchmark = True  # speed up convs for fixed input sizes
 
     # Load U-Net model
     model = UNet(n_classes=3).to(device)
@@ -599,7 +606,7 @@ def main():
     def process_image(path, source_label, frame_idx=None):
         start_t = time.time()
         image_pil = Image.open(path).convert('RGB')
-        mask = predict(model, image_pil, device, transform, apply_ship_correction=not args.no_ship_correction)
+        mask = predict(model, image_pil, device, transform, apply_ship_correction=not args.no_ship_correction, use_fp16=True)
         image_bgr = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
         _, horizon_smoothed = compute_horizon_line(mask)
         # Choose detection source
@@ -724,7 +731,7 @@ def main():
                 frame_start = time.time()
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image_pil = Image.fromarray(frame_rgb)
-                mask = predict(model, image_pil, device, transform, apply_ship_correction=not args.no_ship_correction)
+                mask = predict(model, image_pil, device, transform, apply_ship_correction=not args.no_ship_correction, use_fp16=True)
                 _, horizon_smoothed = compute_horizon_line(mask)
                 if prefer_rtdetr_mode and hf_model is not None and hf_processor is not None:
                     run_det_now = (frame_idx // max(1, args.frame_step)) % max(1, args.rtdetr_interval) == 0

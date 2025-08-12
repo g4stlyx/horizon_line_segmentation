@@ -24,7 +24,17 @@ A straightforward and effective strategy is to run the U-Net prediction at a set
 
 ## Performance Improvements
 
-Using U-Net + RT-DETR in the runner code for distance calculation made the app a lot heavier then it is used to be (40 FPS -> 10 FPS), find a way to increase the FPS.
+``Using U-Net + RT-DETR in the runner code for distance calculation made the app a lot heavier then it is used to be (40 FPS -> 10 FPS), find a way to increase the FPS. ``
+
+this is ```KIND OF DONE``` (ofc it can always be better):
+* Horizon computation: kept the new, accurate sky/water separator with object-occlusion bridging. Also vectorized it to reduce per-column Python loops.
+* Enabled cudnn.benchmark when using CUDA to accelerate convolutions with fixed-size inputs.
+* Added optional FP16 inference for the U-Net in the runner; enabled by default in calls.
+
+---
+
+* ~15-20 FPS on GTX 1650 Super 4GB with these settings:
+    * py z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py --video .\0example_data\VIS_Onshore\Videos\MVI_1614_VIS.avi --rtdetr-model rtdetr_obj_det_model/final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 --band-up 160 --band-down 140 --min-area 350 --show-horizon --save
 
 ## New Classes on Segmentation Masks
 
