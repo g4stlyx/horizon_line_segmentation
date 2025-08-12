@@ -1,10 +1,5 @@
 # Maritime Horizon Line Detection & Segmentation
 
-***IMPORTANT: IT IS NOT COMPLETED YET***
-<br>
-
-***IMPORTANT 2: I could not upload models since they are over 100MB and Github does not allow such files to be pushed. i may upload(e.g. to Google Drive) a final model tho when possible***
-
 This repository contains multiple approaches and implementations for detecting horizon lines in maritime environments, ranging from simple image-based detection to advanced real-time video processing with deep learning models.
 
 ## 📁 Project Structure
@@ -75,18 +70,48 @@ Complete training pipeline for horizon detection using deep learning:
 **Input**: VIS_Onboard dataset with MATLAB ground truth files  
 **Output**: Trained models for semantic segmentation
 
-### `3.6training_models/` - Model Training & Experiments
+### `3.6training_dht/` - DHT Training & Experiments
 Collection of trained models and training scripts:
 - **Deep Hough Transform (DHT) Models**:
   - `0.1dht_model_intel.pth`: Trained on Intel image classification dataset
   - `0.2dht_model_smd.pth`: Trained on Singapore Maritime Dataset
-- **U-Net Models**:
-  - `1.0unet_model_smd.pth`: U-Net trained on SMD
-- **Training Scripts**:
-  - Google Colab compatible training scripts
-  - Comparison runners for different model architectures
 
 **Paper Reference**: *"Deep Hough Transform for Semantic Line Detection"*
+
+### `3.7training_unet/` - 2-Class (Sky/Non-Sky) and 3-Class (Sky/Water/Object) U-Net
+- **U-Net (legacy 2-class + ship-aware) Training**:
+  - Binary sky vs non-sky training and ship-aware variants
+  - Utilities and runners (legacy), e.g. `z_unet_runner.py`, `z_unet_runner_dist_calc_rtdetr_obj_det.py`
+- **RT-DETR Checkpoints** (for object detection during preprocessing/inference):
+  - `rtdetr_obj_det_model/final_best_model/` (contains `config.json`, `model.safetensors`, `preprocessor_config.json`)
+Modern 3-class U-Net training and runners with RT-DETR integration:
+- **Training**:
+  - `4training_unet_ship_aware_rtdetr_3_class.py`: End-to-end Colab pipeline
+    - Preprocessing with horizon GT (sky/water) + RT-DETR overrides to mark objects (class 2)
+    - U-Net head with `n_classes=3`; loss = weighted CrossEntropy + multi-class Dice
+    - Saves best weights as `best_unet_rtdetr_aware_smd_3cls.pth`
+- **Runner / Inference**:
+  - `z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py`
+    - Horizon estimated from sky/water boundary (objects ignored)
+    - RT-DETR used for per-object boxes and signed center-to-horizon distances
+    - Supports image/folder/video/camera, optional CSV export and angle column
+- **Note**: Land/shore pixels are treated as water to keep the horizon boundary clean.
+
+**Paper References**:
+- U-Net (Ronneberger et al., 2015)
+- RT-DETR (Real-Time Detection Transformer)
+
+### `3.8training_yolov8-seg/` - YOLOv8 Segmentation Training
+End-to-end scripts to train and run YOLOv8 segmentation for maritime scenes:
+- `train_yolov8_seg_colab.py`: Colab training script (can be adapted for 3-class sky/water/object)
+- `z_yolov8_runner.py`: Inference/runner utilities
+- `results/`: Outputs and examples
+
+**Note**: Can mirror the U-Net horizon extraction logic (sky/water boundary) and integrate object distances.
+
+### `3.9training_transformers/` - Transformers (SegFormer)
+Utilities, notes, and configs for transformer-based object detection:
+- to be continued
 
 ## 🔬 Research Papers & Methods
 
@@ -100,11 +125,16 @@ Collection of trained models and training scripts:
    - Method: ARIMA/GARCH models for ROI prediction
 
 3. **"Deep Hough Transform for Semantic Line Detection"**
-   - Used in: `3.6training_models/`
+   - Used in: `3.6training_dht_and_unet/`
    - Method: Deep learning approach to line detection
 
 4. **"Comparison of Semantic Segmentation Approaches for Horizon Line Detection"**
    - Referenced throughout for method comparison
+
+5. **"U-Net: Convolutional Networks for Biomedical Image Segmentation"**
+   - Used in: `3.7training_unet/`
+   - Method: Encoder-decoder segmentation backbone for sky/water/object
+
 
 ## 🗄️ Datasets Used
 
@@ -119,13 +149,7 @@ Collection of trained models and training scripts:
 1. **For simple image processing**: Start with `3.1horizon_segment_images/`
 2. **For video processing**: Use `3.2horizon_segment_video/`
 3. **For research implementation**: Check `3.3horizon_segment_real-time_based_on_a_paper/`
-4. **For training custom models**: Use `3.5fine-tune_pre-trained_model_pytorch/` or `3.6training_models/`
-
-## 📊 Performance Notes
-
-- **Best Performance**: `3.2horizon_segment_video/` and `3.3horizon_segment_real-time_based_on_a_paper/`
-- **Experimental**: `3.4hld_using_tsa--not_good_enough_+_slow/` (slower, less accurate)
-- **Training Ready**: `3.5fine-tune_pre-trained_model_pytorch/` and `3.6training_models/`
+4. **For training custom models**: Use `3.5fine-tune_pre-trained_model_pytorch/`, `3.6training_dht/`, or `3.7training_unet/`
 
 ## 🎯 Key Features Across Implementations
 

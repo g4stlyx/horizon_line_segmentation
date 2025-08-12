@@ -1,0 +1,137 @@
+{
+  "activation_dropout": 0.0,
+  "activation_function": "silu",
+  "anchor_image_size": null,
+  "architectures": [
+    "RTDetrForObjectDetection"
+  ],
+  "attention_dropout": 0.0,
+  "auxiliary_loss": true,
+  "backbone": null,
+  "backbone_config": {
+    "depths": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "downsample_in_bottleneck": false,
+    "downsample_in_first_stage": false,
+    "embedding_size": 64,
+    "hidden_act": "relu",
+    "hidden_sizes": [
+      64,
+      128,
+      256,
+      512
+    ],
+    "layer_type": "basic",
+    "model_type": "rt_detr_resnet",
+    "num_channels": 3,
+    "out_features": [
+      "stage2",
+      "stage3",
+      "stage4"
+    ],
+    "out_indices": [
+      2,
+      3,
+      4
+    ],
+    "stage_names": [
+      "stem",
+      "stage1",
+      "stage2",
+      "stage3",
+      "stage4"
+    ]
+  },
+  "backbone_kwargs": null,
+  "batch_norm_eps": 1e-05,
+  "box_noise_scale": 1.0,
+  "d_model": 256,
+  "decoder_activation_function": "relu",
+  "decoder_attention_heads": 8,
+  "decoder_ffn_dim": 1024,
+  "decoder_in_channels": [
+    256,
+    256,
+    256
+  ],
+  "decoder_layers": 3,
+  "decoder_n_points": 4,
+  "disable_custom_kernels": true,
+  "dropout": 0.0,
+  "encode_proj_layers": [
+    2
+  ],
+  "encoder_activation_function": "gelu",
+  "encoder_attention_heads": 8,
+  "encoder_ffn_dim": 1024,
+  "encoder_hidden_dim": 256,
+  "encoder_in_channels": [
+    128,
+    256,
+    512
+  ],
+  "encoder_layers": 1,
+  "eos_coefficient": 0.0001,
+  "eval_size": null,
+  "feat_strides": [
+    8,
+    16,
+    32
+  ],
+  "focal_loss_alpha": 0.75,
+  "focal_loss_gamma": 2.0,
+  "freeze_backbone_batch_norms": true,
+  "hidden_expansion": 0.5,
+  "id2label": {
+    "0": "Boat",
+    "1": "Buoy",
+    "2": "Ferry",
+    "3": "Flying bird-plane",
+    "4": "Kayak",
+    "5": "Other",
+    "6": "Sail boat",
+    "7": "Speed boat",
+    "8": "Vessel-ship"
+  },
+  "initializer_bias_prior_prob": null,
+  "initializer_range": 0.01,
+  "is_encoder_decoder": true,
+  "label2id": {
+    "Boat": 0,
+    "Buoy": 1,
+    "Ferry": 2,
+    "Flying bird-plane": 3,
+    "Kayak": 4,
+    "Other": 5,
+    "Sail boat": 6,
+    "Speed boat": 7,
+    "Vessel-ship": 8
+  },
+  "label_noise_ratio": 0.5,
+  "layer_norm_eps": 1e-05,
+  "learn_initial_query": false,
+  "matcher_alpha": 0.25,
+  "matcher_bbox_cost": 5.0,
+  "matcher_class_cost": 2.0,
+  "matcher_gamma": 2.0,
+  "matcher_giou_cost": 2.0,
+  "model_type": "rt_detr",
+  "normalize_before": false,
+  "num_denoising": 100,
+  "num_feature_levels": 3,
+  "num_queries": 300,
+  "positional_encoding_temperature": 10000,
+  "torch_dtype": "float32",
+  "transformers_version": "4.55.0.dev0",
+  "use_focal_loss": true,
+  "use_pretrained_backbone": false,
+  "use_timm_backbone": false,
+  "weight_loss_bbox": 5.0,
+  "weight_loss_giou": 2.0,
+  "weight_loss_vfl": 1.0,
+  "with_box_refine": true
+}
