@@ -28,6 +28,9 @@ Examples:
   Image: py z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py --image .\0example_data\images\image.jpeg --rtdetr-model rtdetr_obj_det_model/final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 \--band-up 160 --band-down 140 --min-area 350 --show-horizon --save
 """
 
+#! py z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py --video .\0example_data\VIS_Onshore\Videos\MVI_1614_VIS.avi --rtdetr-model rtdetr_obj_det_model/final_best_model --prefer-rtdetr --rtdetr-conf 0.25 --rtdetr-classes 0,1,2,4,6,7,8 --rtdetr-interval 5 --band-up 160 --band-down 140 --min-area 350 --camera-height-m 12 --fov-vertical 30 --refraction-k 1.3333 --distance-units m --show-horizon --save
+#* You must provide --fov-vertical and a realistic --camera-height-m for physical distances to be meaningful. With missing FOV, real-world distances are skipped but pixel gap is reported.
+
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -42,6 +45,7 @@ import time
 import os
 import glob
 import csv
+import math
 try:
     # Hugging Face Transformers RT-DETR checkpoint (directory with config.json + model.safetensors)
     from transformers import AutoImageProcessor, AutoModelForObjectDetection
@@ -284,6 +288,142 @@ def compute_horizon_line(mask, gap_threshold=15, smooth_window=21):
     smoothed = np.convolve(padded, kernel, mode='valid')
     return horizon.astype(np.int32), smoothed.astype(np.int32)
 
+def compute_depression_angle_and_range_m(
+    signed_pixel_offset: int,
+    image_height_px: int,
+    fov_vertical_deg: float,
+    camera_height_m: float,
+    effective_earth_radius_m: float,
+) -> tuple:
+    """
+    Convert vertical pixel offset from the horizon (positive = below) to:
+      - depression angle from horizon (deg)
+      - surface range to a sea-level target (meters)
+      - gap from the geometric horizon point (meters)
+
+    Uses a robust ray–sphere intersection in the vertical plane with effective
+    Earth radius (refraction-adjusted). This is stable and physically correct.
+    """
+    if fov_vertical_deg is None or image_height_px <= 0:
+        return None, None, None
+
+    # Angle below horizon for this pixel offset (signed from caller).
+    deg_per_pixel = fov_vertical_deg / float(image_height_px)
+    depression_deg = signed_pixel_offset * deg_per_pixel
+
+    R = float(effective_earth_radius_m)
+    h = max(0.0, float(camera_height_m))
+
+    # Minimum depression to just see the horizon
+    theta0 = math.acos(max(-1.0, min(1.0, R / (R + h))))
+    s0 = R * theta0
+    alpha0 = theta0  # depression from horizontal to horizon ray
+
+    # Total depression from horizontal to the viewing ray
+    alpha = alpha0 + math.radians(max(0.0, depression_deg))
+    if alpha <= alpha0:
+        return depression_deg, None, 0.0
+
+    # Ray-sphere intersection: observer O=(0,0,R+h), dir v=(cos a,0,-sin a)
+    sin_a = math.sin(alpha)
+    cos_a = math.cos(alpha)
+    b = (R + h) * sin_a
+    disc = b * b - (2.0 * R * h + h * h)
+    if disc < 0.0:
+        # Numerical guard
+        return depression_deg, None, 0.0
+    t = b + math.sqrt(disc)  # forward intersection along the viewing ray
+    if t <= 0:
+        return depression_deg, None, 0.0
+
+    # Central angle to intersection point
+    pz = (R + h) - t * sin_a
+    cos_theta = max(-1.0, min(1.0, pz / R))
+    theta = math.acos(cos_theta)
+
+    range_m = R * theta
+    # Gap beyond the horizon arc along the surface
+    gap_m = max(0.0, range_m - s0)
+    return depression_deg, range_m, gap_m
+
+def attach_ranges(
+    objects: list,
+    image_height_px: int,
+    fov_vertical_deg: float,
+    camera_height_m: float,
+    effective_earth_radius_m: float,
+    units: str,
+    model: str = 'flat',
+):
+    """Augments each object dict with 'depression_angle_deg', 'range_m', 'gap_m', and 'units'.
+
+    If the object center lies above the horizon (negative signed distance), we
+    attempt to use the bbox bottom edge relative to the horizon to recover a
+    positive depression angle and compute distance. This covers ships whose
+    centers are above the horizon while their hulls extend below it.
+    """
+    for o in objects:
+        # Center-based signed distance
+        if 'signed_distance' in o and o['signed_distance'] is not None:
+            sdist_center = int(o['signed_distance'])
+        else:
+            cx, cy = o.get('center', (None, None))
+            horizon_y = o.get('horizon_y', None)
+            sdist_center = int(cy - horizon_y) if (cy is not None and horizon_y is not None) else 0
+
+        # Alternative: bbox bottom against horizon
+        horizon_y = o.get('horizon_y', None)
+        bbox = o.get('bbox', None)
+        sdist_bottom = None
+        if bbox is not None and horizon_y is not None:
+            bx, by, bw, bh = bbox
+            bottom_y = by + bh
+            sdist_bottom = int(bottom_y - int(horizon_y))
+
+        # Choose the offset for range calc:
+        # - If s (center) < 0, per request use |s| (positive) instead of skipping.
+        # - Otherwise use s if > 0. If still not >0, try bbox-bottom.
+        if sdist_center < 0:
+            sdist_for_range = abs(sdist_center)
+            o['range_source'] = 'center_abs'
+        elif sdist_center > 0:
+            sdist_for_range = sdist_center
+            o['range_source'] = 'center'
+        elif sdist_bottom is not None and sdist_bottom > 0:
+            sdist_for_range = sdist_bottom
+            o['range_source'] = 'bbox_bottom'
+        else:
+            sdist_for_range = 0
+            o['range_source'] = 'none'
+
+        dep_deg, rng_m, gap_m = compute_depression_angle_and_range_m(
+            sdist_for_range,
+            image_height_px,
+            fov_vertical_deg,
+            camera_height_m,
+            effective_earth_radius_m,
+        )
+        # Optional flat-plane distance from camera to intersection with sea plane
+        flat_m = None
+        if fov_vertical_deg is not None and image_height_px > 0 and camera_height_m is not None:
+            dep_rad_abs = abs((fov_vertical_deg / float(image_height_px)) * sdist_for_range) * (math.pi / 180.0)
+            if dep_rad_abs > 1e-6:
+                flat_m = float(camera_height_m) / math.tan(dep_rad_abs)
+        o['depression_angle_deg'] = dep_deg
+        # Choose which distance to expose as D via 'gap_m'
+        if model == 'flat' and flat_m is not None and flat_m >= 0:
+            o['range_m'] = None
+            o['gap_m'] = flat_m
+            o['units'] = units
+        elif rng_m is not None and rng_m >= 0:
+            o['range_m'] = float(rng_m)
+            o['gap_m'] = float(gap_m) if gap_m is not None else None
+            o['units'] = units
+        else:
+            o['range_m'] = None
+            o['gap_m'] = None
+            o['units'] = units
+
 def detect_objects_near_horizon(
     mask,
     horizon_smoothed,
@@ -371,11 +511,41 @@ def annotate(image_bgr, mask, horizon_smoothed, objects, show_horizon=True, fps=
             conf = obj.get('confidence', 0.0)
             class_name = coco_names.get(class_id, f'cls{class_id}')
             sdist = obj.get('signed_distance', cy - horizon_y)
-            label = f"ID{idx} {class_name} {conf:.2f} d={dist}px s={sdist}"
+            # Prefer real-world distance if available (gap from horizon)
+            rng_m = obj.get('gap_m', None)
+            units = obj.get('units', 'm')
+            if rng_m is not None:
+                if units == 'nm':
+                    rng_val = rng_m / 1852.0
+                    rng_txt = f"{rng_val:.2f}nm"
+                else:
+                    rng_val = rng_m
+                    rng_txt = f"{rng_val:.0f}m"
+                label = f"ID{idx} {class_name} {conf:.2f} D={rng_txt} s={sdist}"
+            else:
+                # If real-world distance missing (e.g., no FOV), show pixel gap in m equivalent per-pixel angle
+                if obj.get('depression_angle_deg') is not None and obj.get('units') == 'm':
+                    # derive gap from angle magnitude when R known
+                    dep = obj['depression_angle_deg']
+                    # these values are redundantly computed in attach_ranges; if None, fallback to pixels
+                    label = f"ID{idx} {class_name} {conf:.2f} s={sdist}"
+                else:
+                    label = f"ID{idx} {class_name} {conf:.2f} s={sdist}"
         else:
             box_color = (0, 255, 0)  # Green for segmentation detections
             sdist = obj.get('signed_distance', cy - horizon_y)
-            label = f"ID{idx} d={dist}px s={sdist}"
+            rng_m = obj.get('gap_m', None)
+            units = obj.get('units', 'm')
+            if rng_m is not None:
+                if units == 'nm':
+                    rng_val = rng_m / 1852.0
+                    rng_txt = f"{rng_val:.2f}nm"
+                else:
+                    rng_val = rng_m
+                    rng_txt = f"{rng_val:.0f}m"
+                label = f"ID{idx} D={rng_txt} s={sdist}"
+            else:
+                label = f"ID{idx} s={sdist}"
         
         cv2.rectangle(vis, (x,y), (x+bw, y+bh), box_color, 2)
         cv2.circle(vis, (cx, cy), 4, (0,0,255), -1)
@@ -455,12 +625,29 @@ def detect_objects_rtdetr(
         if cx < 0 or cx >= w:
             continue
 
-        horizon_y = int(horizon_smoothed[cx])
-        band_top = horizon_y - band_up
-        band_bottom = horizon_y + band_down
-        if not (band_top <= cy <= band_bottom):
+        # Accept detection if its bbox intersects the horizon band at any of a few sampled columns.
+        x1i = max(0, int(round(x1)))
+        x2i = min(w - 1, int(round(x2)))
+        if x2i < x1i:
+            continue
+        sample_xs = [int((x1i + x2i) / 2)]
+        if x2i - x1i > 10:
+            q1 = int(x1i + 0.25 * (x2i - x1i))
+            q3 = int(x1i + 0.75 * (x2i - x1i))
+            sample_xs.extend([q1, q3])
+        intersects_band = False
+        for sx in sample_xs:
+            hy = int(horizon_smoothed[sx])
+            band_top = hy - band_up
+            band_bottom = hy + band_down
+            # y-intervals [y1,y2] and [band_top,band_bottom] intersect?
+            if max(y1, band_top) <= min(y2, band_bottom):
+                intersects_band = True
+                break
+        if not intersects_band:
             continue
 
+        horizon_y = int(horizon_smoothed[cx])
         pixel_distance = int(abs(horizon_y - cy))
 
         objects.append({
@@ -468,6 +655,7 @@ def detect_objects_rtdetr(
             'center': (cx, cy),
             'horizon_y': horizon_y,
             'pixel_distance': pixel_distance,
+            'signed_distance': int(cy - horizon_y),
             'confidence': confidence,
             'class_id': class_id,
             'det': 'rtdetr'
@@ -509,7 +697,7 @@ def _resolve_rtdetr_weights(path_or_dir: str) -> str:
         print(f"[WARN] No .pt/.pth weights found under directory: {path_or_dir}")
     return None
 
-def maybe_write_csv_header(csv_path, include_angle):
+def maybe_write_csv_header(csv_path, include_angle, distance_units):
     if not csv_path:
         return
     write_header = not os.path.exists(csv_path)
@@ -520,6 +708,8 @@ def maybe_write_csv_header(csv_path, include_angle):
             if include_angle:
                 header.append('vertical_angle_deg')
             header.append('signed_distance')
+            # Gap from horizon to object center, in chosen units
+            header.append('gap_' + ('nm' if distance_units == 'nm' else 'm'))
             writer.writerow(header)
 
 def append_csv_rows(csv_path, rows):
@@ -552,6 +742,11 @@ def main():
     parser.add_argument('--rtdetr-classes', type=str, help='Comma-separated class ids to keep (optional)')
     parser.add_argument('--prefer-rtdetr', action='store_true', help='Use RT-DETR detections instead of segmentation blobs if available')
     parser.add_argument('--rtdetr-interval', type=int, default=1, help='Run RT-DETR every N processed frames and reuse between (improves FPS)')
+    # Real-distance estimation options
+    parser.add_argument('--camera-height-m', type=float, default=10.0, help='Camera height above sea level in meters')
+    parser.add_argument('--earth-radius-m', type=float, default=6371000.0, help='Earth radius in meters (mean ~6371000)')
+    parser.add_argument('--refraction-k', type=float, default=1.3333, help='Refraction factor k (effective Earth radius = k * Earth radius), typical ~4/3')
+    parser.add_argument('--distance-units', type=str, choices=['m','nm'], default='m', help='Units for displayed/exported distance (meters or nautical miles)')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -601,7 +796,11 @@ def main():
     ])
 
     include_angle = args.fov_vertical is not None
-    maybe_write_csv_header(args.export_csv, include_angle)
+    # Precompute effective Earth radius
+    effective_R = (args.refraction_k if args.refraction_k is not None else 1.0) * (args.earth_radius_m if args.earth_radius_m is not None else 6371000.0)
+    distance_units = args.distance_units
+    maybe_write_csv_header(args.export_csv, include_angle, distance_units)
+
 
     def process_image(path, source_label, frame_idx=None):
         start_t = time.time()
@@ -637,6 +836,16 @@ def main():
                 band_down=args.band_down,
                 min_area=args.min_area,
             )
+        # Attach real-world ranges
+        attach_ranges(
+            objects,
+            image_height_px=mask.shape[0],
+            fov_vertical_deg=args.fov_vertical,
+            camera_height_m=args.camera_height_m,
+            effective_earth_radius_m=effective_R,
+            units=distance_units,
+            model='flat',
+        )
         fps = 1.0 / max(1e-6, (time.time() - start_t))
         annotated = annotate(image_bgr, mask, horizon_smoothed, objects, args.show_horizon, fps=fps)
         rows = []
@@ -651,6 +860,13 @@ def main():
                 deg_per_pixel = args.fov_vertical / h_img
                 row.append(dist * deg_per_pixel)
             row.append(sdist)
+            # Export real-world gap from horizon (converted) or empty
+            rng_m = obj.get('gap_m', None)
+            if rng_m is not None:
+                rng_val = (rng_m / 1852.0) if distance_units == 'nm' else rng_m
+                row.append(rng_val)
+            else:
+                row.append("")
             rows.append(row)
         append_csv_rows(args.export_csv, rows)
         return annotated
@@ -755,9 +971,32 @@ def main():
                             cx, cy = o['center']
                             if cx < 0 or cx >= frame.shape[1]:
                                 continue
-                            horizon_y = int(horizon_smoothed[cx])
-                            if not (horizon_y - args.band_up <= cy <= horizon_y + args.band_down):
+                            # Accept if bbox intersects current horizon band at any sampled x across bbox
+                            x, y, bw, bh = o['bbox']
+                            x1 = x
+                            y1 = y
+                            x2 = x + bw
+                            y2 = y + bh
+                            x1i = max(0, int(round(x1)))
+                            x2i = min(frame.shape[1] - 1, int(round(x2)))
+                            if x2i < x1i:
                                 continue
+                            sample_xs = [int((x1i + x2i) / 2)]
+                            if x2i - x1i > 10:
+                                q1 = int(x1i + 0.25 * (x2i - x1i))
+                                q3 = int(x1i + 0.75 * (x2i - x1i))
+                                sample_xs.extend([q1, q3])
+                            intersects_band = False
+                            for sx in sample_xs:
+                                hy = int(horizon_smoothed[sx])
+                                band_top = hy - args.band_up
+                                band_bottom = hy + args.band_down
+                                if max(y1, band_top) <= min(y2, band_bottom):
+                                    intersects_band = True
+                                    break
+                            if not intersects_band:
+                                continue
+                            horizon_y = int(horizon_smoothed[cx])
                             objects.append({
                                 'bbox': o['bbox'],
                                 'center': (cx, cy),
@@ -784,6 +1023,16 @@ def main():
                         band_down=args.band_down,
                         min_area=args.min_area,
                     )
+                # Attach real-world ranges for current frame
+                attach_ranges(
+                    objects,
+                    image_height_px=mask.shape[0],
+                    fov_vertical_deg=args.fov_vertical,
+                    camera_height_m=args.camera_height_m,
+                    effective_earth_radius_m=effective_R,
+                    units=distance_units,
+                    model='flat',
+                )
                 fps_frame = 1.0 / max(1e-6, (time.time() - frame_start))
                 annotated = annotate(frame, mask, horizon_smoothed, objects, args.show_horizon, fps=fps_frame)
                 rows = []
@@ -798,6 +1047,12 @@ def main():
                         deg_per_pixel = args.fov_vertical / h_img
                         row.append(dist * deg_per_pixel)
                     row.append(sdist)
+                    rng_m = obj.get('gap_m', None)
+                    if rng_m is not None:
+                        rng_val = (rng_m / 1852.0) if distance_units == 'nm' else rng_m
+                        row.append(rng_val)
+                    else:
+                        row.append("")
                     rows.append(row)
                 append_csv_rows(args.export_csv, rows)
                 display_frame = annotated
