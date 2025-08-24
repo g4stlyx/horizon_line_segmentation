@@ -29,7 +29,7 @@ Examples:
 """
 
 #! py 5z_unet_runner_dist_calc_yolo_obj_det_3_class.py --video .\0example_data\VIS_Onshore\Videos\MVI_1614_VIS.avi --yolo-model obj_det_havelsan.pt --prefer-yolo --yolo-conf 0.25 --yolo-interval 5 --band-up 160 --band-down 140 --min-area 350 --camera-height-m 12 --fov-vertical 30 --refraction-k 1.3333 --distance-units m --show-horizon --save
-#! py 5z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py --video .\0data\havelsan.mkv --yolo-model .\0data\obj_det_havelsan.pt --prefer-yolo --yolo-conf 0.25 --yolo-interval 5 --band-up 160 --band-down 140 --min-area 350 --show-horizon --save
+#! py 3.7training_unet\5z_unet_runner_dist_calc_yolo_obj_det_3_class.py --video .\0data\havelsan.mkv --yolo-model 0data\obj_det_havelsan.pt --prefer-yolo --yolo-conf 0.25 --yolo-interval 5 --band-up 160 --band-down 140 --min-area 350 --camera-height-m 12 --fov-vertical 30 --refraction-k 1.3333 --distance-units m --show-horizon --save
 #* You must provide --fov-vertical and a realistic --camera-height-m for physical distances to be meaningful. With missing FOV, real-world distances are skipped but pixel gap is reported.
 
 import torch
@@ -677,7 +677,7 @@ def append_csv_rows(csv_path, rows):
 
 def main():
     parser = argparse.ArgumentParser(description='3-Class U-Net Horizon Distance Calculator')
-    parser.add_argument('--model-path', type=str, default='./3.7training_unet/4best_unet_rtdetr_aware_smd_3cls.pth', help='Path to trained 3-class U-Net weights')
+    parser.add_argument('--model-path', type=str, default='./0data/models/best_unet_yolo_aware_smd_3cls.pth', help='Path to trained 3-class U-Net weights')
     parser.add_argument('--image', type=str, help='Single image path')
     parser.add_argument('--folder', type=str, help='Folder of images')
     parser.add_argument('--video', type=str, help='Video file path')

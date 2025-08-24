@@ -709,7 +709,7 @@ class_weights = torch.tensor([1.0, 1.0, 2.0], device=device)  # objects are rare
 criterion_ce = nn.CrossEntropyLoss(weight=class_weights)
 criterion_dice = MultiClassDiceLoss(num_classes=3)
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=5, verbose=True)
+scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=5)
 
 def train_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs):
     print("\n--- Starting YOLO-Aware U-Net Training ---")
