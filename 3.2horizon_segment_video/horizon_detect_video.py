@@ -4,7 +4,7 @@ Preserves all ships and non-sky objects while detecting horizon line.
 
 ! py horizon_detect_video.py --video videos/MVI_1626_VIS.avi --show-objects --output results/1626_result.mp4
 
-TODO: need to be tested on more videos
+TODO: need to be tested on more complex videos
 TODO: it sometimes stops working, should be more stable, threshold may be lowered.
 TODO: scene-specific horizon detection modes (sunset, night, foggy etc.) using horizon_detect.py functions
 TODO: detect_horizon_by_edges_with_color can be used when color-based detection fails

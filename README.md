@@ -139,17 +139,8 @@ Utilities, notes, and configs for transformer-based object detection:
 ## 🗄️ Datasets Used
 
 - **Singapore Maritime Dataset (SMD)**: Onboard and onshore maritime videos
-- **Horizon Lines in the Wild (HLW)**: Natural horizon line dataset
-- **KITTI-Horizon**: Automotive dataset adapted for horizon detection
-- **Intel Image Classification Dataset**: Used for transfer learning
+- **Intel Image Classification Dataset**: Used in DHT 1.0
 - **VIS_Onboard**: Maritime video dataset with MATLAB ground truth
-
-## 🚀 Getting Started
-
-1. **For simple image processing**: Start with `3.1horizon_segment_images/`
-2. **For video processing**: Use `3.2horizon_segment_video/`
-3. **For research implementation**: Check `3.3horizon_segment_real-time_based_on_a_paper/`
-4. **For training custom models**: Use `3.5fine-tune_pre-trained_model_pytorch/`, `3.6training_dht/`, or `3.7training_unet/`
 
 ## 🎯 Key Features Across Implementations
 

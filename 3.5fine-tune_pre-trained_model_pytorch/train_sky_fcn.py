@@ -19,7 +19,7 @@ Dataset layout  (one sub-dir per split):
            images/...
            masks/...
 
-Mask files must share **exact** filename stem with the image.
+Mask files must share **exact** filename body with the image.
 """
 import argparse, os, time, numpy as np, torch, torch.nn as nn
 from torch.utils.data import DataLoader, Dataset

@@ -4,8 +4,6 @@
 
 ! datasets: 
     ! Singapore Maritime Dataset (SMD): https://sites.google.com/site/dilipprasad/home/singapore-maritime-dataset (onshore)
-    Horizon Lines in the Wild (HLW)	
-    KITTI‑Horizon	
 
 ! papers:
     https://www.ijcaonline.org/archives/volume121/number10/21574-4625/

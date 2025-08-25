@@ -8,7 +8,7 @@ This script combines:
 3. Improved post-processing and temporal stability
 
 The AI model provides sky probability as a prior, while color-based methods
-provide the actual horizon line detection.
+provide the actual horizon line detection
 """
 
 import cv2
