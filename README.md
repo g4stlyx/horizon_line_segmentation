@@ -2,6 +2,11 @@
 
 This repository contains multiple approaches and implementations for detecting horizon lines in maritime environments, ranging from simple image-based detection to advanced real-time video processing with deep learning models.
 
+--- 
+
+### IMPORTANT NOTE: <br>
+``Versions below 3.7 are not working well enough in the context of both accuracy and speed. U-Net is the main focus of this repository for now, while YOLOv11-seg, YUnet, and transformer-based models will be examined and worked on in the future.``
+
 ## 📁 Project Structure
 
 ### `0sunum/` - Presentations & Documentation -hidden lol-
