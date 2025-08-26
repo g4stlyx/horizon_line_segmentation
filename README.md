@@ -5,7 +5,15 @@ This repository contains multiple approaches and implementations for detecting h
 --- 
 
 ### IMPORTANT NOTE: <br>
-``Versions below 3.7 are not working well enough in the context of both accuracy and speed. U-Net is the main focus of this repository for now, while YOLOv11-seg, YUnet, and transformer-based models will be examined and worked on in the future.``
+Versions <b>below 3.7</b> are not working well enough in the context of both accuracy and speed. <b>U-Net</b> is the main focus of this repository for now, while <b>YOLOv11-seg</b>, <b>YUnet</b>, and <b>transformer-based models</b> will be examined and worked on in the future.
+
+### IMPORTANT NOTE 2:
+* 3.7training_unet klasöründe 'iyi' çalışan son versiyon <b>ismi 4 ile başlayanlar</b>. İçeriği:
+  * Google colab'de eğitim yapmak için üretilmiş bir <b>training kodu</b> (3 class'lı segmentasyon yapan bir unet modeli),
+  * <b>Piksel bazlı</b> uzaklık (ufuk çizgisi ve nesne merkezi arası) hesabı yapan bir runner kod,
+  * <b>Metre/Mil bazlı</b> uzaklık hesabı/tahmini yapmayı deneyen, çok da başarılı olamayan (düz kamera ile bu çok mümkün değil galiba) bir runner kod içeriyor.
+* 5 ile başlayan training ve runner kodlar local'de, bir havelsan video'su ve object detection modeli kullanacak şekilde çalışması için üretildi, bu data eğitim ve test için bir gün kullanıldı ve çok iyi bir sonuç vermedi.
+  * İyi bir sonuç için daha fazla, segmentasyon için <b>etiketlenmiş</b> (sky, sea, land, object şeklinde ayrılmış) dataya ihtiyaç var, bununla çözülebileceğini düşünüyorum.
 
 ## 📁 Project Structure
 
