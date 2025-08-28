@@ -109,7 +109,20 @@ Highlights:
 | `4z_unet_runner_dist_calc_rtdetr_obj_det_3_class.py` | v4 3-class | RT-DETR | 3 | Full 3-class + distances |
 | `5z_unet_runner_dist_calc_yolo_obj_det_3_class.py` | v5 3-class | YOLO | 3 | Local YOLO + distances + custom video support |
 
----
+## Sample Results
+
+v3 runner (2-class):
+
+![v3 runner – pixel distances](../0result_images/unet.3.1614.png)
+
+v4 runner (3-class, pixel distances):
+
+![v4 runner – pixel distances](../0result_images/unet.4.1614.px.png)
+
+v4 runner (3-class, physical distance estimation attempt):
+
+![v4 runner – physical distance estimation](../0result_images/unet.4.1614.m.png)
+
 ## Typical Workflow (v5 Example – Local YOLO 3-Class)
 
 1. Place / verify resources under `0data/`:
