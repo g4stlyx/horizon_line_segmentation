@@ -114,6 +114,20 @@ Modern 3-class U-Net training and runners with RT-DETR integration:
 - U-Net (Ronneberger et al., 2015)
 - RT-DETR (Real-Time Detection Transformer)
 
+#### Sample Results (3.7 U-Net Evolution)
+
+v3 runner (2-class, pixel distances):
+
+![v3 runner – pixel distances](0result_images/unet.3.1614.png)
+
+v4 runner (3-class, pixel distances):
+
+![v4 runner – pixel distances](0result_images/unet.4.1614.px.png)
+
+v4 runner (3-class, physical distance estimation attempt):
+
+![v4 runner – physical distance estimation](0result_images/unet.4.1614.m.png)
+
 ### `3.8training_yolov8-seg/` - YOLOv8 Segmentation Training
 End-to-end scripts to train and run YOLOv8 segmentation for maritime scenes:
 - `train_yolov8_seg_colab.py`: Colab training script (can be adapted for 3-class sky/water/object)
