@@ -7,7 +7,7 @@ from pathlib import Path
 # -----------------------------------------------------------------------------
 # Paths (relative to project root 4segFormerB2)
 # -----------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATASETS_ROOT = PROJECT_ROOT / "datasets"
 
 # LaRS: lars_images/{train,val,test}/images, lars_annotations/{train,val,test}/semantic_masks

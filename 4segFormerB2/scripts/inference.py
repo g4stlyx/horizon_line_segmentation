@@ -1,5 +1,10 @@
 """
 Inference: image, folder, video, or camera. Optional horizon line from sky/water boundary.
+example usage:
+py scripts/inference.py --input 0
+py scripts/inference.py --input path/to/video.mp4 --output out.mp4
+py scripts/inference.py --input datasets/lars/lars_images/test/images/davimar_seq_02_00040.jpg --output output/results/image_seg.png
+py scripts/inference.py --input datasets/mastr1325/MaSTr1325_images_512x384/0001.jpg --output output/results/image_seg0001.png
 """
 from pathlib import Path
 import argparse
@@ -9,7 +14,8 @@ import cv2
 from PIL import Image
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
 import config
 from model import get_segformer_b2_maritime
 
@@ -94,6 +100,7 @@ def run_image(model: torch.nn.Module, image_path: Path, device: str, save_path: 
     horizon_y = horizon_from_mask(pred) if show_horizon else None
     vis = draw_overlay(image, pred, horizon_y)
     if save_path:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(save_path), vis)
     return vis, pred
 
@@ -104,6 +111,7 @@ def run_video(model: torch.nn.Module, video_path: Path | int, device: str, save_
         raise RuntimeError(f"Cannot open video: {video_path}")
     out_video = None
     if save_path:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         out_video = cv2.VideoWriter(str(save_path), fourcc, cap.get(cv2.CAP_PROP_FPS) or 25, (w, h))
@@ -134,16 +142,20 @@ def run_video(model: torch.nn.Module, video_path: Path | int, device: str, save_
 
 
 def main():
+    _default_ckpt = _PROJECT_ROOT / "output" / "models" / "best_segformer_b2_maritime.pt"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to best_segformer_b2_maritime.pt")
+    parser.add_argument("--checkpoint", type=str, default=str(_default_ckpt), help="Path to .pt checkpoint (default: output/models/best_segformer_b2_maritime.pt)")
     parser.add_argument("--input", type=str, required=True, help="Image path, folder path, video path, or camera index (e.g. 0)")
     parser.add_argument("--output", type=str, default=None, help="Output image/video path")
     parser.add_argument("--no-horizon", action="store_true", help="Do not draw horizon line")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
+    ckpt_path = Path(args.checkpoint)
+    if not ckpt_path.is_file():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
     device = args.device
-    model = load_model(Path(args.checkpoint), device)
+    model = load_model(ckpt_path, device)
     show_horizon = not args.no_horizon
 
     inp = Path(args.input)

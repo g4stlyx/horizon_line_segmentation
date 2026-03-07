@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from data import CombinedMaritimeDataset, get_train_transforms, get_val_transforms
 from model import get_segformer_b2_maritime
