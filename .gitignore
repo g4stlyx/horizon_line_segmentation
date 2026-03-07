@@ -12,7 +12,8 @@
 **/results/
 **/images/
 **/videos/
-**/data/
+**/dataset/
+**/datasets/
 **/videos/
 **/test_results/
 **/test_output/
