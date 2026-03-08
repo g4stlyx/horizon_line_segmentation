@@ -1,6 +1,17 @@
 """
 Configuration for SegFormer-B2 maritime segmentation (LaRS + MaSTr1325).
-Unified 4-class: Sky, Water, Land, Obstacle.
+Unified 3-class: Sky, Water, Obstacle.
+
+Why 3 classes (not 4):
+  MaSTr1325 labels all non-sky/water pixels as "Obstacles & Environment" (class 0),
+  which was previously mapped to Land (unified class 2).
+  LaRS labels all non-sky/water pixels as "Obstacles" (class 0), mapped to Obstacle (class 3).
+  This created contradictory supervision: the same visual objects (ships, cranes, buoys)
+  were labeled Land in MaSTr images and Obstacle in LaRS images. The model learned
+  dataset style rather than semantics, causing predictions to switch between Land and
+  Obstacle depending on which dataset an image resembled. The fix is to unify both
+  into a single Obstacle class (Sky=0, Water=1, Obstacle=2) so both datasets provide
+  consistent training signal.
 """
 from pathlib import Path
 
@@ -25,17 +36,17 @@ LOGS_DIR = PROJECT_ROOT / "logs"
 # -----------------------------------------------------------------------------
 # Classes and label mappings
 # -----------------------------------------------------------------------------
-NUM_CLASSES = 4
-CLASS_NAMES = ("Sky", "Water", "Land", "Obstacle")
+NUM_CLASSES = 3
+CLASS_NAMES = ("Sky", "Water", "Obstacle")
 IGNORE_INDEX = 255
 
 # LaRS semantic PNG: 0=Obstacles, 1=Water, 2=Sky, 255=Ignore
-# We map to: Sky=0, Water=1, Land=2, Obstacle=3
-LARS_TO_UNIFIED = {0: 3, 1: 1, 2: 0}  # Obstacles->3, Water->1, Sky->0
+# Maps to: Sky=0, Water=1, Obstacle=2
+LARS_TO_UNIFIED = {0: 2, 1: 1, 2: 0}  # Obstacles->2, Water->1, Sky->0
 
 # MaSTr1325: 0=Obstacles&Environment, 1=Water, 2=Sky, 4=Ignore (from docs)
-# We map Obstacles&Environment -> Land (2) for consistency with "not sky/water"
-MASTR_TO_UNIFIED = {0: 2, 1: 1, 2: 0}  # Env/Obstacle->2, Water->1, Sky->0
+# Maps to: Sky=0, Water=1, Obstacle=2  (same as LaRS — consistent supervision)
+MASTR_TO_UNIFIED = {0: 2, 1: 1, 2: 0}  # Env/Obstacles->2, Water->1, Sky->0
 MASTR_IGNORE_VALUE = 4
 
 # -----------------------------------------------------------------------------

@@ -14,7 +14,7 @@ import config
 
 
 def _map_mastr_mask(mask: np.ndarray) -> np.ndarray:
-    """MaSTr: 0=Env/Obstacle, 1=Water, 2=Sky, 4=Ignore -> unified 0=Sky, 1=Water, 2=Land, 3=Obstacle, 255=Ignore."""
+    """MaSTr: 0=Env/Obstacle, 1=Water, 2=Sky, 4=Ignore -> unified 0=Sky, 1=Water, 2=Obstacle, 255=Ignore."""
     out = np.full_like(mask, config.IGNORE_INDEX, dtype=np.int64)
     for src, dst in config.MASTR_TO_UNIFIED.items():
         out[mask == src] = dst
@@ -23,7 +23,7 @@ def _map_mastr_mask(mask: np.ndarray) -> np.ndarray:
 
 
 def _map_lars_mask(mask: np.ndarray) -> np.ndarray:
-    """LaRS semantic: 0=Obstacles, 1=Water, 2=Sky, 255=Ignore -> unified 0=Sky, 1=Water, 2=Land, 3=Obstacle."""
+    """LaRS semantic: 0=Obstacles, 1=Water, 2=Sky, 255=Ignore -> unified 0=Sky, 1=Water, 2=Obstacle."""
     out = np.full_like(mask, config.IGNORE_INDEX, dtype=np.int64)
     for src, dst in config.LARS_TO_UNIFIED.items():
         out[mask == src] = dst

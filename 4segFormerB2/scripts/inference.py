@@ -1,10 +1,17 @@
 """
-Inference: image, folder, video, or camera. Optional horizon line from sky/water boundary.
-example usage:
-py scripts/inference.py --input 0
-py scripts/inference.py --input path/to/video.mp4 --output out.mp4
-py scripts/inference.py --input datasets/lars/lars_images/test/images/davimar_seq_02_00040.jpg --output output/results/image_seg.png
-py scripts/inference.py --input datasets/mastr1325/MaSTr1325_images_512x384/0001.jpg --output output/results/image_seg0001.png
+Inference: single image, folder of images, video, or camera. Optional horizon line from sky/water boundary.
+
+--input can be:
+  - Image file (.jpg, .jpeg, .png, .bmp) -> run on that image
+  - Folder path -> run on all images in that folder (top-level only), save to --output dir or <folder>/seg_output
+  - Video path or camera index (e.g. 0) -> run on video stream
+
+Example usage:
+  py scripts/inference.py --input 0
+  py scripts/inference.py --input path/to/video.mp4 --output out.mp4
+  py scripts/inference.py --input path/to/images_folder --output path/to/seg_results
+  py scripts/inference.py --input datasets/lars/lars_images/test/images/davimar_seq_02_00040.jpg --output output/results/image_seg.png
+  py scripts/inference.py --input datasets/mastr1325/MaSTr1325_images_512x384/0001.jpg --output output/results/image_seg0001.png
 """
 from pathlib import Path
 import argparse
@@ -24,10 +31,9 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
 IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 
 CLASS_COLORS_BGR = [
-    (180, 120, 255),   # Sky - light purple
-    (255, 200, 100),   # Water - blue-ish
-    (100, 200, 100),   # Land - green
-    (100, 100, 255),   # Obstacle - red
+    (180, 120, 255),   # Sky     (0) - light purple
+    (255, 200, 100),   # Water   (1) - teal/blue
+    (100, 100, 255),   # Obstacle(2) - red
 ]
 
 
@@ -145,7 +151,7 @@ def main():
     _default_ckpt = _PROJECT_ROOT / "output" / "models" / "best_segformer_b2_maritime.pt"
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, default=str(_default_ckpt), help="Path to .pt checkpoint (default: output/models/best_segformer_b2_maritime.pt)")
-    parser.add_argument("--input", type=str, required=True, help="Image path, folder path, video path, or camera index (e.g. 0)")
+    parser.add_argument("--input", type=str, required=True, help="Image path, folder of images, video path, or camera index (e.g. 0)")
     parser.add_argument("--output", type=str, default=None, help="Output image/video path")
     parser.add_argument("--no-horizon", action="store_true", help="Do not draw horizon line")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")

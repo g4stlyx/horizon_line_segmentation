@@ -14,7 +14,7 @@ import config
 
 def get_segformer_b2_maritime(pretrained: bool = True) -> nn.Module:
     """
-    Load SegFormer-B2 with 4-class decoder (Sky, Water, Land, Obstacle).
+    Load SegFormer-B2 with 3-class decoder (Sky, Water, Obstacle).
     If pretrained, loads nvidia/segformer-b2-finetuned-ade-512-512 and replaces
     the classifier head for num_labels=4.
     """
