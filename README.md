@@ -5,7 +5,7 @@ This repository contains multiple approaches and implementations for detecting h
 --- 
 
 ### IMPORTANT NOTE: <br>
-Versions <b>below 3.7</b> are not working well enough in the context of both accuracy and speed. <b>U-Net</b> is the main focus of this repository for now, while <b>YOLOv11-seg</b>, <b>YUnet</b>, and <b>transformer-based models</b> will be examined and worked on in the future.
+Versions <b>below 3.7</b> are not working well enough in the context of both accuracy and speed. <b>U-Net</b> has been the main focus of this repository, and <b>SegFormer-B2</b> (folder `4segFormerB2`) is now the leading approach — producing strong 4-class segmentation results on the LaRS dataset. <b>YOLOv11-seg</b>, <b>YUnet</b>, and other transformer-based models may be examined and worked on in the future.
 
 ### IMPORTANT NOTE 2:
 * 3.7training_unet klasöründe 'iyi' çalışan son versiyon <b>ismi 4 ile başlayanlar</b>. İçeriği:
@@ -140,6 +140,56 @@ End-to-end scripts to train and run YOLOv8 segmentation for maritime scenes:
 Utilities, notes, and configs for transformer-based object detection:
 - to be continued
 
+---
+
+### `4segFormerB2/` - SegFormer-B2 Maritime Segmentation ⭐ (Current Best)
+End-to-end 4-class semantic segmentation pipeline using **SegFormer-B2** trained on the **LaRS** and **MaSTr1325** datasets. This is currently the most capable and accurate approach in the repository.
+
+**Architecture**: SegFormer-B2 encoder with a lightweight MLP decoder head (`nvidia/mit-b2` backbone via `transformers`).
+
+**Classes**:
+| ID | Class    | Color (visualization) |
+|----|----------|-----------------------|
+| 0  | Sky      | Pink / Magenta        |
+| 1  | Water    | Cyan / Blue           |
+| 2  | Land     | Green                 |
+| 3  | Obstacle | Red                   |
+
+**Horizon line** is extracted as the boundary between sky (class 0) and water (class 1) and drawn as a green overlay on the output image.
+
+**Key files**:
+- `scripts/train.py` — Training script with LaRS + MaSTr1325 combined loader
+- `scripts/inference.py` — Inference for single image, folder, video, or live camera
+- `scripts/test_on_lars.py` — Batch evaluation on the LaRS test split
+- `config/config.py` — All hyperparameters and paths in one place
+- `output/models/best_segformer_b2_maritime.pt` — Best saved checkpoint
+
+**Datasets used**:
+- **LaRS** (Large-scale Aquatic Robin Survey) — with `orca_flow`, `yt*`, `smd*`, `davimar`, `inhouse`, `mit` sequences
+- **MaSTr1325** — Multi-class maritime segmentation dataset
+
+**Results on LaRS**:
+- Tested on diverse LaRS sequences covering open sea, coastal, inland waterway, USV footage
+- `output/lars_test2/` — 61 representative test frames (orca_flow & yt sequences)
+- `output/lars_test/` — Full LaRS test split (600+ frames across all sequence categories)
+- Horizon line detection is clean and stable across challenging conditions (sun glare, ships in foreground, cluttered backgrounds)
+
+**Sample output** (sky=pink, water=cyan, obstacle=red, horizon=green line):
+
+![LaRS test – orca_flow](0result_images/orca_flow_2_00100_seg.png)
+
+**Inference usage**:
+```bash
+# Single image
+python scripts/inference.py --checkpoint output/models/best_segformer_b2_maritime.pt --input path/to/image.jpg
+
+# Folder
+python scripts/inference.py --checkpoint output/models/best_segformer_b2_maritime.pt --input path/to/folder/ --output path/to/out_dir/
+
+# Video
+python scripts/inference.py --checkpoint output/models/best_segformer_b2_maritime.pt --input path/to/video.mp4 --output out.mp4
+```
+
 ## 🔬 Research Papers & Methods
 
 ### Primary Papers Referenced:
@@ -162,12 +212,18 @@ Utilities, notes, and configs for transformer-based object detection:
    - Used in: `3.7training_unet/`
    - Method: Encoder-decoder segmentation backbone for sky/water/object
 
+6. **"SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers"**
+   - Used in: `4segFormerB2/`
+   - Method: Hierarchical transformer encoder (Mix-Transformer) + lightweight MLP decoder; fine-tuned on LaRS + MaSTr1325 for 4-class maritime segmentation
+
 
 ## 🗄️ Datasets Used
 
 - **Singapore Maritime Dataset (SMD)**: Onboard and onshore maritime videos
 - **Intel Image Classification Dataset**: Used in DHT 1.0
 - **VIS_Onboard**: Maritime video dataset with MATLAB ground truth
+- **LaRS (Large-scale Aquatic Robin Survey)**: Large-scale multi-scene maritime dataset; primary training/test dataset for `4segFormerB2`. Includes diverse sequences: open sea (`orca_flow`), coastal/YouTube (`yt*`), inland waterway (`orca_usv_inland`), harbor (`davimar_seq`, `inhouse_seq`), research vessel (`mit_seq`), and SMD-derived sequences.
+- **MaSTr1325**: Multi-class maritime segmentation dataset (1325 images); used alongside LaRS to train the SegFormer-B2 model
 
 ## 🎯 Key Features Across Implementations
 
